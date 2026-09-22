@@ -1,0 +1,33 @@
+# Your own private strings for the privacy checks: never published (see release/privacy.py).
+release/private-patterns.txt
+
+# Build output: the staged packages and ZIPs go on the Releases page, not in the repository.
+release/dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+.venv*/
+.pytest_cache/
+
+# What running the app or an install from this folder leaves behind
+app/settings.json
+installation.json
+logs/
+cache/
+.runtime/
+.downloads/
+bin/
+third_party/
+yolo11n.pt
+.ultralytics/
+.setup.lock
+
+# Footage and results never belong here
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.360
+*.insv

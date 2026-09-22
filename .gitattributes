@@ -1,0 +1,9 @@
+# The trained models are stored with Git LFS: visual.pt alone is over GitHub's 100 MB file limit.
+cutter_v4/models/*.pt filter=lfs diff=lfs merge=lfs -text
+cutter_v4/models/*.joblib filter=lfs diff=lfs merge=lfs -text
+
+# The Mac scripts must keep Unix line endings on every checkout, or macOS refuses to run them.
+*.sh text eol=lf
+*.command text eol=lf
+# Windows batch files need CRLF.
+*.cmd text eol=crlf

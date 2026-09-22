@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "models": {
+    "visual": {
+      "file": "visual.pt",
+      "sha256": "3e3b8f9fa53755c9f9660105d6f772a9bd4a2ef8f009b9a331ec8cd6a5f18321",
+      "bytes": 132757515,
+      "class_names": [
+        "break_off",
+        "canopy_flight",
+        "climbing_out",
+        "exit",
+        "freefall",
+        "inside_plane",
+        "landed",
+        "landing",
+        "opening_parachutes"
+      ],
+      "description": "R3D-18 window classifier trained on 414 labelled jumps (Kinetics-400 initialisation).",
+      "tensors_verified_equal": true
+    },
+    "temporal": {
+      "file": "temporal.pt",
+      "sha256": "bf80388643daa27428c9334595a648ab435999bd8dfc13315809a47531255883",
+      "bytes": 1020161,
+      "class_names": [
+        "break_off",
+        "canopy_flight",
+        "climbing_out",
+        "exit",
+        "freefall",
+        "inside_plane",
+        "landed",
+        "landing",
+        "opening_parachutes"
+      ],
+      "description": "T2 temporal head over the window embeddings; used without the boundary snap.",
+      "tensors_verified_equal": true
+    },
+    "audio": {
+      "file": "audio.pt",
+      "sha256": "5ed1f94a7e998818113075a2bef9605f6ffd3bbde91322c2fbf9a810a4b5d981",
+      "bytes": 844753,
+      "class_names": [
+        "inside_plane",
+        "climbing_out",
+        "exit",
+        "freefall",
+        "break_off",
+        "opening_parachutes",
+        "canopy_flight",
+        "landing",
+        "landed"
+      ],
+      "description": "V3 audio model: 73 audio features per 3 s window, bidirectional GRU.",
+      "tensors_verified_equal": true
+    },
+    "motion": {
+      "file": "motion.joblib",
+      "sha256": "6a81786b50e085fe4ef3ae0ee203711243926ba37604da303c95415d3b74a03d",
+      "bytes": 1661684,
+      "scikit_learn": "1.6.1",
+      "training_videos": 722,
+      "training_seconds": 84759,
+      "phase_counts": {
+        "inside_plane": 1768,
+        "climbing_out": 4335,
+        "exit": 1543,
+        "freefall": 11490,
+        "break_off": 976,
+        "opening_parachutes": 1349,
+        "canopy_flight": 56767,
+        "landing": 4226,
+        "landed": 2305
+      },
+      "description": "Motion-only phase classifier (gradient boosting on per-second accelerometer and gyro summaries). Fitted on survey pseudo-labels of unlabelled videos; a check on the video model, never an override."
+    }
+  },
+  "engine_revision": "v4-t2-nosnap-audiofreefall30-1"
+}

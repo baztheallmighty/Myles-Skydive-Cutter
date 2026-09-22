@@ -1,0 +1,75 @@
+# A clean install of the macOS package on real Macs: an Apple Silicon runner and an Intel runner.
+#
+# The model weights are not in version control, so this installs a built package rather than building one. Build it
+# with `python release/build_cutter_package.py --mac`, upload the ZIP somewhere this workflow can fetch (a draft
+# GitHub release works), then run this workflow from the Actions tab with its address and SHA-256.
+#
+# GitHub's Macs are virtual machines without Apple's GPU, so setup runs with --cpu. Everything else is what a person
+# gets: the ZIP is unpacked the way Finder does it, with the system Bash 3.2, and setup downloads every piece itself.
+name: macOS install
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_url:
+        description: Address of Skydive-Cutter-<version>-macos.zip
+        required: true
+      package_sha256:
+        description: Its SHA-256 (from the .zip.sha256 file the build writes)
+        required: true
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Download the package
+        env:
+          PACKAGE_URL: ${{ inputs.package_url }}
+          PACKAGE_SHA256: ${{ inputs.package_sha256 }}
+        run: |
+          curl -fSL --retry 3 -o package.zip "$PACKAGE_URL"
+          echo "$PACKAGE_SHA256  package.zip" | shasum -a 256 -c -
+
+      - name: Unpack it the way Finder does
+        run: |
+          ditto -xk package.zip unpacked
+          ls -l unpacked/*/
+
+      - name: The scripts parse with the Bash macOS ships
+        run: |
+          /bin/bash --version | head -1
+          cd unpacked/*/
+          for script in *.sh *.command; do /bin/bash -n "$script"; done
+
+      - name: The launchers kept their permissions
+        run: |
+          cd unpacked/*/
+          test -x "Skydive Cutter.command" && test -x "Repair.command" && test -x "Install Missing.command"
+
+      - name: Setup, from nothing
+        run: |
+          cd unpacked/*/
+          /bin/bash ./setup.sh --cpu
+
+      - name: The launcher finds everything
+        run: |
+          cd unpacked/*/
+          /bin/bash ./skydive-cutter.sh --check-only
+
+      - name: Repair, over the top
+        run: |
+          cd unpacked/*/
+          /bin/bash ./setup.sh --repair --cpu
+          /bin/bash ./skydive-cutter.sh --check-only
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.runner }}
+          path: unpacked/*/logs/

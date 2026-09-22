@@ -1,0 +1,7 @@
+# PyTorch for Windows x64, cpu build, from https://download.pytorch.org/whl/cpu
+# Written by release/lock_requirements.py from release/locks/tested-windows.txt. Do not edit by hand.
+# Installed with --require-hashes --no-deps --only-binary=:all:, then checked with pip check.
+torch==2.7.1+cpu \
+    --hash=sha256:0bc887068772233f532b51a3e8c8cfc682ae62bef74bf4e0c53526c8b9e4138f
+torchvision==0.22.1+cpu \
+    --hash=sha256:433cb4dbced7291f17064cea08ac1e5aebd02ec190e1c207d117ad62a8961f2b

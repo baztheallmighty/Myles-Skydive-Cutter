@@ -1,0 +1,69 @@
+{
+  "note": "Everything the macOS setup downloads besides the Python packages. Python and the person detector are pinned by checksum; FFmpeg takes the publisher's current build (see ffmpeg.note). The Python packages are pinned, with their checksums, in requirements-mac-arm64.txt and requirements-mac-intel.txt.",
+  "python": {
+    "arm64": {
+      "filename": "cpython-3.12.14-aarch64-apple-darwin.tar.gz",
+      "sha256": "3ee3ee547cedfeb7c2b16b2b7156039f7b470bb8f857e226fd3d2eb11db83c76",
+      "urls": [
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14+20260901-aarch64-apple-darwin-install_only.tar.gz"
+      ]
+    },
+    "x86_64": {
+      "filename": "cpython-3.12.14-x86_64-apple-darwin.tar.gz",
+      "sha256": "2e31b23f3f1319f707d0e620b48847a0046577541d357276821f9f1b5492e0ba",
+      "urls": [
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14+20260901-x86_64-apple-darwin-install_only.tar.gz"
+      ]
+    }
+  },
+  "torch": {
+    "arm64": {
+      "device": "mps",
+      "note": "Apple Silicon wheels include the Metal backend. PyTorch 2.7.1, from the lock file."
+    },
+    "x86_64": {
+      "device": "cpu",
+      "note": "PyTorch stopped building Intel macOS wheels after 2.2, so Intel Macs use 2.2.2 on the processor. The shipped models give identical answers on 2.2.2 and 2.7.1; this was checked before release."
+    }
+  },
+  "ffmpeg": {
+    "arm64": {
+      "ffmpeg": {
+        "filename": "ffmpeg9arm.zip",
+        "urls": [
+          "https://www.osxexperts.net/ffmpeg9arm.zip"
+        ]
+      },
+      "ffprobe": {
+        "filename": "ffprobe9arm.zip",
+        "urls": [
+          "https://www.osxexperts.net/ffprobe9arm.zip"
+        ]
+      }
+    },
+    "x86_64": {
+      "ffmpeg": {
+        "filename": "ffmpeg80intel.zip",
+        "urls": [
+          "https://www.osxexperts.net/ffmpeg80intel.zip"
+        ]
+      },
+      "ffprobe": {
+        "filename": "ffprobe80intel.zip",
+        "urls": [
+          "https://www.osxexperts.net/ffprobe80intel.zip"
+        ]
+      }
+    },
+    "note": "Static builds from osxexperts.net, which replaces these files in place when FFmpeg updates. They are not pinned by checksum: setup accepts any copy that runs and reports FFmpeg 7 or newer (the minimum is in setup.sh).",
+    "minimum_version": 7
+  },
+  "people": {
+    "filename": "yolo11n.pt",
+    "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+    "note": "Person detector weights. The ultralytics library itself is in the lock files. Ultralytics is AGPL-3.0.",
+    "urls": [
+      "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"
+    ]
+  }
+}

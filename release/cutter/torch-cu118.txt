@@ -1,0 +1,7 @@
+# PyTorch for Windows x64, cu118 build, from https://download.pytorch.org/whl/cu118
+# Written by release/lock_requirements.py from release/locks/tested-windows.txt. Do not edit by hand.
+# Installed with --require-hashes --no-deps --only-binary=:all:, then checked with pip check.
+torch==2.7.1+cu118 \
+    --hash=sha256:80855ec840b7b06372ff43535d01393a8ec101842618d1f9ed629572b52aed71
+torchvision==0.22.1+cu118 \
+    --hash=sha256:3e927a3b0b08c7582cfa09e5f16b35435de390a612cfe76eed1418ab7b68d6b6
