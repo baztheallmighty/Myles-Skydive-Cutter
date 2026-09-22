@@ -545,6 +545,15 @@ def main() -> int:
           'double-clicking a result opens that video in Review')
 
     # Re-cut now: lengthen freefall by 3 s in your labels, mark reviewed, and the clip follows straight away.
+    # The people filter goes first, whatever footage this is run on: on most real jumps nobody is in frame in the
+    # seconds after freefall, so the clip ends where the people end and could not follow a change to the phase at all.
+    from dataclasses import replace as replace_profile
+    window.profiles = [replace_profile(p, min_person_count=0, min_total_area_percent=0.0) for p in window.profiles]
+    window.refresh_profiles()
+    window.process_again(next(r['key'] for r in window.results.rows if r['name'].endswith('jump1.mp4')))
+    window.start_session(True)
+    check(wait_until(lambda: not window.active and any(r['name'].endswith('jump1.mp4') for r in window.results.rows)),
+          'jump1 cut again with the people filter out of the way')
     before = clip_spans('jump1.mp4')
     mine = sorted(labeller.sorted_current_video_segment_indexes(), key=lambda i: labeller.segments[i].start_sec)
     freefall = next(i for i in mine if labeller.segments[i].phase == 'freefall')
