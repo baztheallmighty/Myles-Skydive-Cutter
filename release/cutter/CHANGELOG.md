@@ -4,6 +4,13 @@
 
 Installs you can rely on, on all three kinds of computer, and a library that survives being moved.
 
+**Counting people**
+- **The last moment of a video no longer loses the whole jump.** A video is sampled once a second, so a recording of
+  257.507 seconds is sampled at 257.5: inside the video, but past its final frame. Reading nothing there counted as a
+  damaged file and failed the video, although its phases, sound and motion had all succeeded. The frame just before it
+  is used instead, and only if that cannot be read either does the last second count as nobody in frame. A failure
+  anywhere earlier still stops the video. Found on a real library: 1 video in 86.
+
 **Your library**
 - **Moving things reprocesses nothing.** Unzipping a new version beside the old one used to change every video's
   fingerprint and process the whole library again. So did the library drive coming back as another letter. Now the

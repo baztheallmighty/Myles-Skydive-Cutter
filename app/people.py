@@ -83,6 +83,18 @@ class PeopleSampler:
                                               ffmpeg=ffmpeg, view=view)
         return merge_views(per_view) if len(per_view) > 1 else next(iter(per_view.values()))
 
+    @staticmethod
+    def read_sample(capture, cv2, seconds, step_back):
+        """The frame at ``seconds``, or None. Retried one frame earlier, for a sample past the last frame."""
+        for moment in (seconds, seconds - step_back):
+            if moment < 0:
+                break
+            capture.set(cv2.CAP_PROP_POS_MSEC, moment * 1000)
+            ok, frame = capture.read()
+            if ok:
+                return frame
+        return None
+
     def sample_view(self, source, duration, settings, runner, media=None, ffmpeg=None, view='front'):
         import cv2
         from app.detection import detect_people, find_person_class_ids, load_yolo_model
@@ -125,11 +137,19 @@ class PeopleSampler:
         try:
             if not capture.isOpened():
                 raise ValueError(f'Cannot open video: {source}')
+            rate = capture.get(cv2.CAP_PROP_FPS)
+            step_back = 1.0 / rate if rate and rate > 0 else 1.0 / 30
             for index, t in enumerate(grid):
                 runner.check_cancelled()
-                capture.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-                ok, frame = capture.read()
-                if not ok:
+                frame = self.read_sample(capture, cv2, t, step_back)
+                if frame is None:
+                    # The last sample can sit between the final frame and the end of the video: a 257.507 s recording
+                    # is sampled at 257.5, which is inside it but past every frame. That is not a damaged file.
+                    if index == len(grid) - 1:
+                        rows.append({'time_sec': t, 'person_count': 0, 'largest_person_area_percent': 0.0,
+                                     'total_person_area_percent': 0.0})
+                        runner.report_progress('people', index + 1, len(grid))
+                        continue
                     raise ValueError(f'Cannot decode person sample at {t:.3f}s in {source.name}.')
                 boxes = detect_people(self.model, frame, settings.detection_confidence, self.person_ids)
                 rows.append({'time_sec': t, **detection_metrics(boxes)})
