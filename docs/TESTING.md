@@ -14,6 +14,9 @@ Run-Tests.cmd full       :: adds the install check
 To test with a Python outside this folder, set `SC_PYTHON` to it first. See [DEVELOPMENT.md](DEVELOPMENT.md) for
 setting one up.
 
+[FEATURE_TESTS.md](FEATURE_TESTS.md) is the other half of this: every feature, what covers it, and what a person
+still has to try before a release.
+
 ## The layers
 
 | Layer | Where | Needs | Time | What it proves |
