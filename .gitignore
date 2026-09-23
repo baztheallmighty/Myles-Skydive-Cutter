@@ -31,3 +31,6 @@ yolo11n.pt
 *.MOV
 *.360
 *.insv
+
+# Ultralytics writes its settings beside whatever runs it when YOLO_CONFIG_DIR is unset
+Ultralytics/

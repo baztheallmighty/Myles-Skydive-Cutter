@@ -213,8 +213,10 @@ try {
         try {
             $setupPython = Install-SetupRuntime $setupProfile
             # Ultralytics sends anonymous usage statistics unless told not to; Skydive Cutter stays offline.
+            # The quotes matter: PowerShell strips double quotes out of an argument, so Python must see single ones.
             $env:YOLO_CONFIG_DIR = Join-Path $setupCache 'ultralytics'
-            & $setupPython -s -B -c 'from ultralytics import settings; settings.update({"sync": False})' | Out-Null
+            & $setupPython -s -B -c "from ultralytics import settings; settings.update({'sync': False})" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not switch off Ultralytics' usage statistics (exit $LASTEXITCODE)." }
             Invoke-SetupPython $setupPython @('-B',(Join-Path $setupRoot 'verify_install.py'),'--device',$setupDevice)
             $setupEnvironment = @{ profile = $setupProfile; device = $setupDevice; python = $setupPython }
             break

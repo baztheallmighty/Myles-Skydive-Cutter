@@ -168,6 +168,22 @@ class TestWindowsScripts:
         assert 'Write-Host "$_"' in (WINDOWS / 'Setup.ps1').read_text(encoding='utf-8')
 
     @pytest.mark.skipif(not shutil.which('powershell.exe'), reason='needs Windows PowerShell')
+    def test_python_one_liners_survive_powershell(self):
+        """PowerShell strips double quotes out of an argument, so a -c one-liner must quote with single ones.
+
+        `settings.update({"sync": False})` reached Python as `{sync: False}`, so switching off the detector's usage
+        statistics failed silently for the whole of 2.4.0's first build.
+        """
+        setup = (WINDOWS / 'Setup.ps1').read_text(encoding='utf-8')
+        for line in setup.splitlines():
+            if '-c' in line and 'python' in line.lower() or "$setupPython -s -B -c" in line:
+                assert '{"' not in line, f'double quotes inside a Python one-liner: {line.strip()}'
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+                                 '& { $args } "from ultralytics import settings; settings.update({\'sync\': False})"'],
+                                capture_output=True, text=True, creationflags=NO_WINDOW)
+        assert "{'sync': False}" in result.stdout, f'PowerShell mangled the argument: {result.stdout!r}'
+
+    @pytest.mark.skipif(not shutil.which('powershell.exe'), reason='needs Windows PowerShell')
     def test_the_scripts_parse(self):
         for name in ('Setup.ps1', 'Skydive-Cutter.ps1'):
             script = ("$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile("

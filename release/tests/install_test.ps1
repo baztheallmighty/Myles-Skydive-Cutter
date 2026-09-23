@@ -128,7 +128,9 @@ $damaged = Join-Path (Split-Path -Parent $python) 'Lib\site-packages\numpy\__ini
 Remove-Item $damaged
 Check 'a damaged library is noticed' {
     $ErrorActionPreference = 'Continue'   # Python's traceback on stderr is the expected result, not a failure
-    & $python -s -B -c 'import numpy' 2>&1 | Out-Null
+    # Using it, not just importing it: a package folder whose __init__.py is gone still imports, as an empty
+    # namespace package, so `import numpy` alone succeeds and proves nothing.
+    & $python -s -B -c 'import numpy; numpy.zeros(1)' 2>&1 | Out-Null
     $LASTEXITCODE -ne 0
 }
 $began = Get-Date
