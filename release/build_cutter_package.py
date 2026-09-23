@@ -21,7 +21,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / 'release'
-VERSION = '2.4.1'
+VERSION = '2.4.2'
 MAC = '--mac' in sys.argv
 PLATFORM = 'macos' if MAC else 'windows'
 NAME = f'Skydive-Cutter-{VERSION}' + ('-macos' if MAC else '')

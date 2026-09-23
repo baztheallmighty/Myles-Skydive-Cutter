@@ -29,33 +29,33 @@
   "ffmpeg": {
     "arm64": {
       "ffmpeg": {
-        "filename": "ffmpeg9arm.zip",
+        "filename": "ffmpeg-9.0.2.zip",
         "urls": [
-          "https://www.osxexperts.net/ffmpeg9arm.zip"
+          "https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip"
         ]
       },
       "ffprobe": {
-        "filename": "ffprobe9arm.zip",
+        "filename": "ffprobe-9.0.2.zip",
         "urls": [
-          "https://www.osxexperts.net/ffprobe9arm.zip"
+          "https://evermeet.cx/ffmpeg/ffprobe-9.0.2.zip"
         ]
       }
     },
     "x86_64": {
       "ffmpeg": {
-        "filename": "ffmpeg80intel.zip",
+        "filename": "ffmpeg-9.0.2.zip",
         "urls": [
-          "https://www.osxexperts.net/ffmpeg80intel.zip"
+          "https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip"
         ]
       },
       "ffprobe": {
-        "filename": "ffprobe80intel.zip",
+        "filename": "ffprobe-9.0.2.zip",
         "urls": [
-          "https://www.osxexperts.net/ffprobe80intel.zip"
+          "https://evermeet.cx/ffmpeg/ffprobe-9.0.2.zip"
         ]
       }
     },
-    "note": "Static builds from osxexperts.net, which replaces these files in place when FFmpeg updates. They are not pinned by checksum: setup accepts any copy that runs and reports FFmpeg 7 or newer (the minimum is in setup.sh).",
+    "note": "FFmpeg 9.0.2 static builds from evermeet.cx, the macOS build site ffmpeg.org links to. They are Intel programs: Apple Silicon runs them through Rosetta 2, which setup checks for first. Setup accepts any copy that runs and reports FFmpeg 7 or newer (the minimum is in setup.sh). These versioned files are not replaced in place; their evermeet.cx signatures (key 20F6 EA3E 0CFD 6B4C 5344 7A73 476C 4B61 1A66 0874) were checked on 23 September 2026.",
     "minimum_version": 7
   },
   "people": {

@@ -327,6 +327,7 @@ class MainWindow(QMainWindow):
         for value, label in device_choices():
             self.device.addItem(label, value)
         self.device.setCurrentIndex(max(0, self.device.findData(self.settings.device)))
+        self.device.currentIndexChanged.connect(lambda _index: self.refresh_health())
         advanced.addRow('Process on', self.device)
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 64)
@@ -862,6 +863,16 @@ class MainWindow(QMainWindow):
         """``only``: process just these files now (re-cut after a review), then stop."""
         try:
             settings = self.read_settings()
+            # Check again here, whatever started this: the GPU answer may not have landed yet, the device may have
+            # changed since, and a re-cut from the Review tab never passes the Process button.
+            if self.cuda is None:
+                self.cuda = cuda_available()
+            self.health_checks = check_install(settings, cuda_available=self.cuda)
+            self.apply_health()
+            stoppers = blocking(self.health_checks)
+            if stoppers:
+                self.show_warning(f'Not started. {stoppers[0].label}: {stoppers[0].detail}')
+                return
             self.session = ProcessingSession(settings, existing_only, only, processor_factory=VideoProcessor)
             self.unreadable_reported = False
             save_settings(settings)

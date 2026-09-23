@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.4.2 (September 2026)
+
+A dropped connection during setup no longer leaves a PC with a good NVIDIA GPU on the processor. Every download now
+comes from the project's own site, or from a site that project links to.
+
+- **A failed download no longer counts as a GPU problem.** Windows setup used to install the processor build
+  whenever anything went wrong while installing the NVIDIA build, including a dropped connection, and then said the
+  GPU could not be used. Now only a GPU that fails its check falls back; a failed download stops setup, and running
+  it again continues from what was already downloaded. Each download also gets three tries before its next source.
+- **Choosing a GPU the install cannot use stops processing at once.** The check used to run only when the app
+  opened, so choosing NVIDIA GPU afterwards, or a re-cut from the Review tab, sent every video to a GPU that was not
+  there and each failed with "Check that it plays correctly". The app now checks again whenever the setting changes
+  and before any run starts, and if the processor build is installed it says how to get the GPU build.
+- **Mac FFmpeg comes from evermeet.cx**, the macOS build site ffmpeg.org links to, instead of osxexperts.net, which
+  ffmpeg.org does not link to. The files are versioned (FFmpeg 9.0.2), so they are no longer replaced under the same
+  name. They are Intel programs, so on Apple Silicon setup first checks for Apple's Rosetta 2 and, if it is missing,
+  says how to install it.
+- **Mac setup installs from PyPI only**, as Windows setup already did, whatever the Mac's own pip settings say.
+- The third-party notices now list where each platform's Python and FFmpeg come from.
+
 ## 2.4.1 (September 2026)
 
 Installs you can rely on, on all three kinds of computer, and a library that survives being moved.

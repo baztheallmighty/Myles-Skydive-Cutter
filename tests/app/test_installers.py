@@ -149,6 +149,48 @@ class TestMacScripts:
         readme = self.text('README-mac.md')
         assert 'Open Anyway' in readme and 'Privacy & Security' in readme
 
+    def test_packages_come_from_pypi_whatever_the_macs_pip_settings(self):
+        assert '--index-url https://pypi.org/simple' in self.text('setup.sh')
+
+
+# Where each download may come from: the project's own site, or a build site the project's download page links to.
+# ffmpeg.org/download.html links gyan.dev (and gyan.dev its GitHub mirror) for Windows and evermeet.cx for macOS.
+OFFICIAL_HOSTS = {
+    'www.python.org': 'CPython',
+    'files.pythonhosted.org': 'PyPI',
+    'www.gyan.dev': 'FFmpeg for Windows, linked from ffmpeg.org',
+    'github.com/GyanD/codexffmpeg/': "gyan.dev's own GitHub mirror, linked from gyan.dev",
+    'evermeet.cx': 'FFmpeg for macOS, linked from ffmpeg.org',
+    'github.com/astral-sh/python-build-standalone/': "python-build-standalone's own releases",
+    'github.com/ultralytics/assets/': "Ultralytics' own releases",
+}
+
+
+def download_urls(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from (item if key == 'urls' else download_urls(item))
+
+
+class TestDownloadSources:
+    """Only official sources: a download from anywhere else is a release blocker, however well its checksum matches."""
+
+    @pytest.mark.parametrize('manifest', [WINDOWS / 'downloads.json', MAC / 'downloads.json'], ids=['windows', 'mac'])
+    def test_every_download_address_is_an_official_source(self, manifest):
+        import json
+        urls = list(download_urls(json.loads(manifest.read_text(encoding='utf-8'))))
+        assert urls
+        for url in urls:
+            assert url.startswith('https://'), url
+            where = url[len('https://'):]
+            assert any(where.startswith(host + ('' if host.endswith('/') else '/')) for host in OFFICIAL_HOSTS), (
+                f'{url} is not an official source. Add it to OFFICIAL_HOSTS only with the page that links to it.')
+
+    def test_windows_pins_its_package_indexes(self):
+        setup = (WINDOWS / 'Setup.ps1').read_text(encoding='utf-8')
+        assert "'--index-url','https://pypi.org/simple'" in setup
+        assert '"https://download.pytorch.org/whl/$Build"' in setup
+
 
 class TestWindowsScripts:
     def test_hash_checked_wheels_from_the_locks(self):
@@ -163,6 +205,18 @@ class TestWindowsScripts:
     def test_launchers_pass_their_arguments_on(self):
         from release.build_cutter_package import launcher
         assert '%*' in launcher('Skydive-Cutter.ps1', ' -Repair', True)
+
+    def test_only_a_failed_gpu_check_falls_back_to_the_processor(self):
+        """2.4.1: a dropped download inside the fallback's try left a laptop's RTX GPU on the processor build."""
+        setup = (WINDOWS / 'Setup.ps1').read_text(encoding='utf-8')
+        loop = setup[setup.index('foreach ($setupProfile in $setupProfiles)'):setup.index('$setupInstalled =')]
+        guarded = loop[loop.index('try {'):loop.index('} catch {')]
+        assert 'Install-SetupRuntime' not in guarded and 'verify_install.py' in guarded
+        assert 'Install-SetupRuntime $setupProfile' in loop
+
+    def test_downloads_retry_a_dropped_connection(self):
+        setup = (WINDOWS / 'Setup.ps1').read_text(encoding='utf-8')
+        assert 'foreach ($setupAttempt in 1..3)' in setup
 
     def test_pip_output_reaches_the_log(self):
         assert 'Write-Host "$_"' in (WINDOWS / 'Setup.ps1').read_text(encoding='utf-8')
@@ -228,6 +282,18 @@ class TestMacScriptsRun:
         result = self.run('setup.sh', self.stand_ins(tmp_path, macos='12.7.4'), cwd=folder)
         assert result.returncode == 1
         assert 'needs macOS 13' in result.stdout and '12.7.4' in result.stdout
+        assert not (folder / '.downloads').exists(), 'nothing is created or downloaded'
+
+    def test_apple_silicon_without_rosetta_is_told_how_before_anything_downloads(self, tmp_path):
+        """The macOS FFmpeg builds are Intel programs; without Rosetta they fail with no useful message."""
+        folder = tmp_path / 'package'
+        folder.mkdir()
+        shutil.copy2(MAC / 'setup.sh', folder / 'setup.sh')
+        shims = self.stand_ins(tmp_path)
+        (shims / 'arch').write_text('#!/bin/bash\nexit 1\n', newline='\n')
+        result = self.run('setup.sh', shims, cwd=folder)
+        assert result.returncode == 1
+        assert 'Rosetta 2' in result.stdout and 'softwareupdate --install-rosetta' in result.stdout
         assert not (folder / '.downloads').exists(), 'nothing is created or downloaded'
 
     def test_a_download_moves_on_when_one_source_gives_the_wrong_file(self, tmp_path):

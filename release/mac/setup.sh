@@ -36,6 +36,16 @@ if [ "${macos%%.*}" -lt 13 ] 2>/dev/null; then
   exit 1
 fi
 
+# FFmpeg comes from the macOS build site ffmpeg.org links to, which builds for Intel only. Apple Silicon runs those
+# programs through Rosetta 2, and a command-line program without it just fails, so check before downloading.
+if [ "$arch" = arm64 ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+  echo "This Mac needs Apple's Rosetta 2 for FFmpeg, and it is not installed yet."
+  echo "Install it by pasting this into Terminal and pressing Return (macOS may ask for your password):"
+  echo "  softwareupdate --install-rosetta"
+  echo "Then run setup again."
+  exit 1
+fi
+
 mkdir -p .downloads cache logs bin
 log="logs/setup-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$log") 2>&1
@@ -131,16 +141,16 @@ device="$(python_field "torch.${arch}.device")"
 [ $force_cpu = 1 ] && device="cpu"
 requirements=requirements-mac-arm64.txt
 if [ "$arch" = x86_64 ]; then requirements=requirements-mac-intel.txt; fi
-pip_flags=(--disable-pip-version-check --no-warn-script-location --only-binary=:all: --require-hashes --no-deps)
+pip_flags=(--disable-pip-version-check --no-warn-script-location --only-binary=:all: --require-hashes --no-deps
+           --index-url https://pypi.org/simple)
 [ $repair = 1 ] && pip_flags+=(--force-reinstall)
 echo "Installing the model libraries from ${requirements}: a large download the first time."
 "$python" -m pip install "${pip_flags[@]}" -r "$requirements"
 "$python" -m pip check
 
 # --- FFmpeg ------------------------------------------------------------------------------------------------
-# osxexperts.net replaces these files in place whenever FFmpeg updates, so there is no fixed checksum to hold them to.
-# A newer FFmpeg is fine (the app uses long-standing options only), so setup accepts any copy that runs on this Mac and
-# reports at least this version.
+# evermeet.cx, the macOS build site ffmpeg.org links to. A newer FFmpeg is fine (the app uses long-standing options
+# only), so setup accepts any copy that runs on this Mac and reports at least this version.
 ffmpeg_minimum=7
 
 usable_tool() {  # usable_tool <program> <name> <minimum major version>  -> succeeds when it runs and is new enough

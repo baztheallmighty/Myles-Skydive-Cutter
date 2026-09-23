@@ -102,9 +102,11 @@ def check_install(settings, cuda_available=None):
             # Expected, not a problem: nothing to warn about on every start.
             checks.append(Check('gpu', 'Processor', OK, 'Intel Macs use the processor', section='processing'))
         elif settings.device in ('cuda', 'mps') and not cuda_available:
-            checks.append(Check('gpu', describe_device(settings.device), ERROR,
-                                'chosen in the settings, but no usable graphics card was found',
-                                section='processing'))
+            detail = ('chosen in the settings, but this install has the processor build. Choose Automatic, or '
+                      'close the app and run Repair.cmd -Mode NVIDIA to install the GPU build'
+                      if settings.device == 'cuda' and not torch_has_cuda() else
+                      'chosen in the settings, but no usable graphics card was found')
+            checks.append(Check('gpu', describe_device(settings.device), ERROR, detail, section='processing'))
         elif settings.device != 'cpu' and not cuda_available:
             checks.append(Check('gpu', label, WARNING,
                                 'none found; the processor does the work, which is several times slower',
@@ -131,6 +133,15 @@ def summary(checks):
         return f'{first.label}: {first.detail}'
     warnings = [check for check in checks if check.state == WARNING]
     return f'{warnings[0].label}: {warnings[0].detail}' if warnings else ''
+
+
+def torch_has_cuda():
+    """Whether the installed PyTorch was built with CUDA at all (the processor build never can be)."""
+    try:
+        import torch
+        return torch.version.cuda is not None
+    except Exception:  # noqa: BLE001 - a missing or broken torch is reported by the packages check
+        return False
 
 
 def cuda_available():

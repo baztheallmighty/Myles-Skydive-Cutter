@@ -18,7 +18,8 @@ audio and motion models were trained from scratch on that footage. No third-part
 
 | Component | Source | Licence |
 | --- | --- | --- |
-| Python 3.12 (embeddable) | python.org | Python Software Foundation License |
+| Python 3.12 (embeddable, Windows) | python.org | Python Software Foundation License |
+| Python 3.12 (macOS) | github.com/astral-sh/python-build-standalone | Python Software Foundation License; the build's bundled libraries keep their own |
 | pip | pypi.org | MIT |
 | PyTorch 2.7.1, torchvision 0.22.1 | download.pytorch.org | BSD 3-Clause. NVIDIA builds include CUDA runtime libraries under NVIDIA's licence terms. |
 | NumPy, SciPy | pypi.org | BSD 3-Clause |
@@ -29,7 +30,8 @@ audio and motion models were trained from scratch on that footage. No third-part
 | opencv-python | pypi.org | Apache 2.0 (bundled FFmpeg libraries: LGPL-2.1) |
 | PySide6 / Qt 6.9 | pypi.org | LGPL-3.0 |
 | Pillow, requests, urllib3, certifi, idna, charset-normalizer, and the other dependencies listed in the `requirements-*.txt` lock files | pypi.org | Their respective permissive licences (see each `.dist-info`) |
-| FFmpeg 8.1.2 "essentials" build | gyan.dev | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
+| FFmpeg 8.1.2 "essentials" build (Windows) | gyan.dev, linked from ffmpeg.org | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
+| FFmpeg 9.0.2 static build (macOS) | evermeet.cx, linked from ffmpeg.org | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
 
 ## Person detection (installed by setup)
 

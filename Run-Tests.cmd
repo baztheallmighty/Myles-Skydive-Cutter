@@ -16,7 +16,7 @@ if errorlevel 1 goto failed
 if /i "%MODE%"=="fast" goto done
 
 rem  The staged package to test. Set SC_PACKAGE to use another, e.g. an installed copy from the install test.
-if "%SC_PACKAGE%"=="" (set "PACKAGE=release\dist\Skydive-Cutter-2.4.1") else (set "PACKAGE=%SC_PACKAGE%")
+if "%SC_PACKAGE%"=="" (set "PACKAGE=release\dist\Skydive-Cutter-2.4.2") else (set "PACKAGE=%SC_PACKAGE%")
 rem  Whichever runtime that package installed: the GPU builds first, then the processor build.
 set "RUNTIME="
 for %%R in (cu128 cu118 cpu) do if not defined RUNTIME if exist "%PACKAGE%\.runtime\%%R\python.exe" set "RUNTIME=%%R"

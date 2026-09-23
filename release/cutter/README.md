@@ -65,7 +65,7 @@ Break-off is the hardest moment to place, for people as well as for the model. S
 
 ## Install
 
-1. Download `Skydive-Cutter-2.4.1-windows.zip`. Right-click it and choose **Extract All** into a short, normal folder,
+1. Download `Skydive-Cutter-2.4.2-windows.zip`. Right-click it and choose **Extract All** into a short, normal folder,
    for example `C:\SkydiveCutter`. Not inside the ZIP, not in Program Files, and not in a OneDrive folder (Desktop,
    Documents and Downloads often are): OneDrive would upload the 10 GB the app installs. Setup checks both, and also
    stops if the folder's path is too long for Windows (over 100 characters).

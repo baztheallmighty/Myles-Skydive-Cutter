@@ -208,6 +208,12 @@ class TestHealth:
         checks = self.check(monkeypatch, cuda=False, settings=Settings(device='cuda'))
         assert [c.key for c in health.blocking(checks)] == ['gpu']
 
+    def test_the_processor_build_says_how_to_get_the_gpu_build(self, monkeypatch):
+        """2.4.1 on a laptop: a dropped download left the processor build, set to the NVIDIA GPU."""
+        monkeypatch.setattr(health, 'torch_has_cuda', lambda: False)
+        checks = self.check(monkeypatch, cuda=False, settings=Settings(device='cuda'))
+        assert 'processor build' in health.summary(checks) and 'Repair.cmd -Mode NVIDIA' in health.summary(checks)
+
     def test_missing_models_and_tools_block(self, monkeypatch):
         checks = self.check(monkeypatch, models=['visual.pt'], tools=['ffmpeg'])
         assert {c.key for c in health.blocking(checks)} == {'models', 'ffmpeg'}

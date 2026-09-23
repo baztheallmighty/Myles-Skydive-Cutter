@@ -112,18 +112,24 @@ try {
         }
         $setupTemporary = $setupDestination + '.download'
         foreach ($setupUrl in @($Item.urls)) {
-            Write-Host "Downloading $($Item.filename) from $(([Uri]$setupUrl).Host)..."
-            try {
-                Invoke-WebRequest -Uri $setupUrl -OutFile $setupTemporary -UseBasicParsing -TimeoutSec 3600
-                if ((Get-FileHash -LiteralPath $setupTemporary -Algorithm SHA256).Hash -eq $Item.sha256) {
-                    Move-Item -LiteralPath $setupTemporary -Destination $setupDestination -Force
-                    return $setupDestination
+            # A dropped connection is usually brief, so each address gets three tries; a wrong file gets one.
+            foreach ($setupAttempt in 1..3) {
+                Write-Host "Downloading $($Item.filename) from $(([Uri]$setupUrl).Host)..."
+                try {
+                    Invoke-WebRequest -Uri $setupUrl -OutFile $setupTemporary -UseBasicParsing -TimeoutSec 3600
+                    if ((Get-FileHash -LiteralPath $setupTemporary -Algorithm SHA256).Hash -eq $Item.sha256) {
+                        Move-Item -LiteralPath $setupTemporary -Destination $setupDestination -Force
+                        return $setupDestination
+                    }
+                    Write-Host "  That copy did not match its checksum." -ForegroundColor Yellow
+                    Remove-Item -LiteralPath $setupTemporary -Force -ErrorAction SilentlyContinue
+                    break
+                } catch {
+                    Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
+                    Remove-Item -LiteralPath $setupTemporary -Force -ErrorAction SilentlyContinue
+                    if ($setupAttempt -lt 3) { Start-Sleep -Seconds (10 * $setupAttempt) }
                 }
-                Write-Host "  That copy did not match its checksum." -ForegroundColor Yellow
-            } catch {
-                Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
             }
-            Remove-Item -LiteralPath $setupTemporary -Force -ErrorAction SilentlyContinue
         }
         throw "Could not download $($Item.filename) from any source. Check the internet connection and run setup again."
     }
@@ -207,16 +213,19 @@ try {
     }
 
     # --- the runtime: the GPU build first, and the processor build if the GPU cannot be used -------------------------
+    # Only a GPU build that installed but then failed its check on this GPU falls back to the processor. A download or
+    # install that fails stops setup instead: falling back then would leave a PC with a good GPU on the processor
+    # for good, reported as a GPU problem. Running setup again continues from the files already downloaded.
     $setupEnvironment = $null
     foreach ($setupProfile in $setupProfiles) {
         $setupDevice = if ($setupProfile -eq 'cpu') { 'cpu' } else { 'cuda' }
+        $setupPython = Install-SetupRuntime $setupProfile
+        # Ultralytics sends anonymous usage statistics unless told not to; Skydive Cutter stays offline.
+        # The quotes matter: PowerShell strips double quotes out of an argument, so Python must see single ones.
+        $env:YOLO_CONFIG_DIR = Join-Path $setupCache 'ultralytics'
+        & $setupPython -s -B -c "from ultralytics import settings; settings.update({'sync': False})" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not switch off Ultralytics' usage statistics (exit $LASTEXITCODE)." }
         try {
-            $setupPython = Install-SetupRuntime $setupProfile
-            # Ultralytics sends anonymous usage statistics unless told not to; Skydive Cutter stays offline.
-            # The quotes matter: PowerShell strips double quotes out of an argument, so Python must see single ones.
-            $env:YOLO_CONFIG_DIR = Join-Path $setupCache 'ultralytics'
-            & $setupPython -s -B -c "from ultralytics import settings; settings.update({'sync': False})" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not switch off Ultralytics' usage statistics (exit $LASTEXITCODE)." }
             Invoke-SetupPython $setupPython @('-B',(Join-Path $setupRoot 'verify_install.py'),'--device',$setupDevice)
             $setupEnvironment = @{ profile = $setupProfile; device = $setupDevice; python = $setupPython }
             break

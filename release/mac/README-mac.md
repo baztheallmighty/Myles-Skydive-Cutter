@@ -11,6 +11,8 @@ run all the way through on a Mac. Please tell me what happens: the setup log is 
 - macOS 13 (Ventura) or newer. Setup checks this first and stops with a message on anything older, because the
   libraries it installs publish nothing for older macOS.
 - An Apple Silicon Mac (M1 or later), or an Intel Mac that runs macOS 13: in practice a 2017 or later model.
+- On Apple Silicon, Apple's Rosetta 2, because the FFmpeg builds ffmpeg.org points to are Intel programs. Most Macs
+  already have it. Setup checks first and, if it is missing, tells you the one command that installs it.
 - About 6 GB free while installing. Setup checks this first too.
 - Internet for the first run only.
 
@@ -82,7 +84,7 @@ released with:
 | --- | --- | --- |
 | Python 3.12.14 | astral-sh/python-build-standalone | its pinned SHA-256 |
 | PyTorch, the person detector (Ultralytics YOLO, AGPL-3.0) and every other library | PyPI, pre-built only | the SHA-256 of each file, listed in `requirements-mac-arm64.txt` or `requirements-mac-intel.txt` |
-| FFmpeg and FFprobe | osxexperts.net static builds, the current version | not pinned (the publisher updates them in place); setup checks each runs and is FFmpeg 7 or newer |
+| FFmpeg and FFprobe 9.0.2 | evermeet.cx static builds, the macOS builds linked from ffmpeg.org | setup checks each runs and is FFmpeg 7 or newer; the publisher's signatures were checked before release |
 | The person detector's model | Ultralytics' release page | its pinned SHA-256 |
 
 ## Licence

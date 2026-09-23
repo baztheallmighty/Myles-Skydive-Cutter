@@ -135,6 +135,30 @@ class TestWhatItBlocks:
         application.processEvents()
         assert built.process_button.isEnabled() and not built.health_banner.isVisible()
 
+    def choose_nvidia_without_a_gpu(self, built, application):
+        built.cuda = False
+        built.refresh_health(cuda=False)
+        built.device.setCurrentIndex(built.device.findData('cuda'))
+        application.processEvents()
+
+    def test_choosing_a_gpu_that_is_not_there_blocks_at_once(self, window):
+        """2.4.1: the check only ran at start-up, so choosing NVIDIA GPU afterwards let every video fail."""
+        built, application, _path = window
+        self.choose_nvidia_without_a_gpu(built, application)
+        assert not built.process_button.isEnabled()
+        assert 'NVIDIA GPU' in built.health_banner.text()
+
+    def test_no_way_of_starting_gets_past_a_blocking_problem(self, window, tmp_path):
+        """A re-cut from the Review tab calls start_session directly, never through the Process button."""
+        built, application, _path = window
+        self.choose_nvidia_without_a_gpu(built, application)
+        video = tmp_path / 'input' / 'jump.mp4'
+        video.write_bytes(b'')
+        built.recut.setChecked(True)
+        built.recut_now(str(video))
+        assert built.session is None and not built.active
+        assert 'Not started' in built.warning.text() and 'NVIDIA GPU' in built.warning.text()
+
 
 class TestDroppingFolders:
     def drop(self, built, widget, folder):
