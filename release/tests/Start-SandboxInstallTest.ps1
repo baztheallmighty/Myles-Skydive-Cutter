@@ -14,7 +14,7 @@ the results folder. Close the Sandbox window when it says it has finished.
 Needs Windows 10/11 Pro or Enterprise with the "Windows Sandbox" feature switched on (Turn Windows features on or off;
 this needs an administrator and a restart, so it is left to you).
 
-    powershell -ExecutionPolicy Bypass -File release\tests\Start-SandboxInstallTest.ps1 -Zip release\dist\Skydive-Cutter-2.4.0-windows.zip
+    powershell -ExecutionPolicy Bypass -File release\tests\Start-SandboxInstallTest.ps1 -Zip release\dist\Skydive-Cutter-2.4.1-windows.zip
 #>
 [CmdletBinding()]
 param(

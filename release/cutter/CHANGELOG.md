@@ -1,8 +1,17 @@
 # Changelog
 
-## 2.4.0 (September 2026)
+## 2.4.1 (September 2026)
 
 Installs you can rely on, on all three kinds of computer, and a library that survives being moved.
+
+This release was installed from its own ZIP on a clean folder, processed a library of 86 jumps, and had every part of
+the window clicked through. What that found is fixed here; see the test record in the repository.
+
+**Privacy**
+- **The person detector's usage statistics are switched off by setup again.** The command that does it was quoted in a
+  way PowerShell mangled, so it failed silently on Windows and left a traceback in the setup log. Nothing was sent
+  meanwhile (the app switches them off itself before it loads the detector), but the first run no longer depends on
+  that.
 
 **Counting people**
 - **The last moment of a video no longer loses the whole jump.** A video is sampled once a second, so a recording of
