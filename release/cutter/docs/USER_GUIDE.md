@@ -25,19 +25,43 @@ Also see the [Output and CSV reference](OUTPUT_REFERENCE.md), [How it works](HOW
 
 1. Double-click **`Skydive Cutter.cmd`**. The first run installs what the app needs (see the
    [README](../README.md#install)); later runs check in a second and open straight away.
-2. Choose **Input videos** (subfolders are included) and **Clips** (where the clips go). You can also drag a folder
+2. Choose **Videos to process** (folders inside it are included) and **Save clips to**. You can also drag a folder
    from Explorer onto either box.
-3. Leave **Exit + Freefall** ticked, or add profiles (**Add preset** has ready-made ones).
+3. Leave **Exit + Freefall** ticked, or add profiles (**Add a ready-made profile** has several).
 4. Click **Process videos**.
 5. When videos appear in **Results**, double-click one, or open the **Review** tab, to see what was cut.
 
+
+## Basic and Advanced
+
+Two buttons at the top of the Process tab choose the screen. A new install opens on **Basic**.
+
+**Basic** asks for two folders and offers three choices. Tick any or all; they run together in one pass.
+
+| Choice | What it keeps | Its own settings |
+| --- | --- | --- |
+| **Trim my footage** | The jump itself: exit, freefall, break-off and the opening. It does not look for people, so it is the fastest. | Seconds before exit (0 to 10). **Also keep the landing**, with 0 to 10 seconds either side, as a second clip. |
+| **A grade (day tape)** | At least 1 person in view filling 20% of the picture, from exit to the end of break-off. | **Include canopy flight with others in view**: at least 2 people filling 20%. That count includes you. |
+| **B grade** | Everything A grade keeps, plus looser footage: people fill 10%, gaps up to 6 seconds are joined, and gaps up to 10 seconds are joined while at least 3 people are still in view. | None. |
+
+Each choice gets a folder inside your clips folder (`Trimmed`, `A grade`, `B grade`). Clips are named after the video
+they came from, for example `GOPR0001 - A grade.mp4`, with a number when one video gives several. If two cards both
+hold a `GOPR0001.MP4`, the second one's clips carry a short code so nothing is overwritten. Because B grade includes
+A grade, the same freefall is in both folders when both are ticked.
+
+**Advanced** is every profile and every setting. The three choices are ordinary profiles there (with their
+companions, `Trimmed landing` and `A grade canopy`), and can be edited like any other. A choice edited in Advanced
+shows "Changed in advanced mode" on the Basic screen, with **Put back** to return it to its built-in settings.
+Profiles of your own are switched off, not deleted, while the Basic screen is showing, and come back on when you
+return to Advanced.
 
 ## The Process tab
 
 | Part | What it does |
 | --- | --- |
-| **Folders** | **Input videos**: the folder with your footage; subfolders are scanned too. **Clips**: where clips are saved. It must be outside the input folder. |
-| **Keep profiles** | What to keep. See [Keep profiles](#keep-profiles). |
+| **Folders** | **Videos to process**: the folder with your footage; folders inside it are scanned too. **Save clips to**: where clips are saved. It must be outside the videos folder. |
+| **What to keep** | The keep profiles. See [Keep profiles](#keep-profiles). |
+| **The ? buttons** | Every setting has one. Click it for a plain explanation of what the setting does, with a warning where changing it goes through your finished videos again. Hovering shows the same text. |
 | **Advanced settings** | Three folding sections under the profiles: Output, Processing and People. See [Advanced settings](#advanced-settings). **Hide advanced settings** folds the lot away. |
 | **The red banner** | Something the app needs is missing. See [When something is missing](#when-something-is-missing). |
 | **Results** | One row per processed video. See [The Results list](#the-results-list). |
@@ -45,8 +69,8 @@ Also see the [Output and CSV reference](OUTPUT_REFERENCE.md), [How it works](HOW
 | **Keep watching for new videos** | Tick it, and after the existing videos the app keeps watching the folder and processes new videos as they are copied in, until you press **Stop**. |
 | **Review cuts in labeller** | Opens the Review tab. |
 
-Timeline CSVs go into a `timelines` folder inside the Clips folder, unless you choose **Somewhere else** under
-Advanced settings > Output > Timeline CSVs.
+Timeline CSVs go into a `timelines` folder inside the clips folder, unless you choose **Somewhere else** under
+Advanced settings > Output > Save timelines to.
 
 ### Repeated camera filenames
 
@@ -59,7 +83,7 @@ so different footage with the same name never collides. You don't need to rename
 Each profile selects footage independently. A moment must pass all of a profile's filters. If you select several
 phases, **any one** of them matches.
 
-Use **Add**, **Edit**, **Duplicate** or **Remove**, or double-click a row. **Add preset** offers ready-made profiles.
+Use **Add**, **Edit**, **Duplicate** or **Remove**, or double-click a row. **Add a ready-made profile** offers presets.
 Each opens in the editor so you can adjust it before saving:
 
 | Preset | Phases | Extra before / after | Other |
@@ -70,17 +94,24 @@ Each opens in the editor so you can adjust it before saving:
 | Landing | Landing, landed | 3 s / 5 s | |
 | Group freefall | Freefall | 2 s / 2 s | At least 2 people covering 30% of the frame (people add-on only) |
 
-The **Enabled** tick turns a profile on or off without deleting it. Disabling or removing a profile never deletes
+The **Use** tick turns a profile on or off without deleting it. Turning off or removing a profile never deletes
 clips it made earlier.
 
 | Setting | Effect |
 | --- | --- |
-| **Name** | Identifies the profile in CSVs and folder names. No semicolons. |
-| **Keep phases** | The phases to keep. |
-| **Minimum people** / **Minimum total person area (%)** | People add-on only. **0** means no requirement. |
-| **Extra footage before / after (seconds)** | Added before and after each kept span, never beyond the video. |
-| **Minimum span (seconds, before margin)** | Drop spans shorter than this. |
-| **Bridge non-matching dips up to (seconds)** | Join matches across a short gap between them. |
+| **Profile name** | Identifies the profile in CSVs and folder names. No semicolons. |
+| **Folder for this profile's clips** | Used with **Organise clips: A folder per profile**. Empty means a folder named after the profile inside the clips folder. A name gives a different folder there (two profiles can share one); a full path puts this profile's clips anywhere. |
+| **Parts of the jump to keep** | A moment is kept only if it falls in a ticked part. Hover over a part to see what it means. |
+| **People in view, at least** | How many people must be visible. **This counts anyone the camera sees, including you**: under canopy or on landing your own legs or arms count as one. **0** keeps moments with nobody in view. |
+| **People fill at least (% of the picture)** | The boxes round everyone in view, added up. About 20% is one person close up; distant jumpers may be 1 to 3%. **0** means no requirement. |
+| **Start each clip earlier by / End each clip later by (seconds)** | Extra footage before and after each kept stretch, never beyond the video. |
+| **Ignore matches shorter than (seconds)** | Drops a matching stretch shorter than this, measured before the extra footage is added. |
+| **Join matches separated by up to (seconds)** | Fills a short gap between two matches, so you get one clip instead of two. The gap is measured between the matches themselves, before the extra footage is added, so it is longer than the hole you see between two clips. |
+| **Join gaps while people are still in view, up to (seconds)** and **People still in view means at least** | A looser join for footage where the camera drifts off the group. A gap between two matches is filled, however little of the picture people fill, while at least that many people are still found. A moment without them inside the gap (the camera looked away) is let through if it is no longer than **Join matches separated by**. It never makes a clip longer at its ends. **0** seconds switches it off. In Review these seconds show as "joined: people still in view". |
+
+Under the settings the editor writes out, in one sentence, what the profile keeps; it changes as you change the
+numbers. A note appears beside the people count when the profile keeps canopy or landing footage, where you are
+usually in your own picture.
 
 The default Exit + Freefall keeps **1 s before and 2 s after**. The end of freefall (break-off) is the least certain
 moment, for the models and for people. In testing, 2 s after instead of 1 s raised the share of jumps with the whole
@@ -137,7 +168,9 @@ position in every row, including your own labels, so you can see at a glance whi
 | **Audio** | The sound model alone, or *No usable audio*. |
 | **Motion model** | A model that uses only the camera's motion data, or *No motion data from this camera*. |
 | **Motion (g)** | Acceleration in g, with gridlines at 0, 1, 2 and 3 g. About 1 g in the plane and under canopy, close to 0 at exit, then spikes at the opening shock and landing, which are marked. |
-| **People in view** | How much of the frame people filled, second by second, with a dashed line at what your profiles ask for. Shaded blocks are the seconds that clear it. If a jump produced no clips, this row usually says why. Hover for the exact count at that second; the overlay on the video shows it too. |
+| **People found** | How many people the detector found, second by second, with the number printed on each stretch and a dashed line at what the profile asks for. Green clears the line; amber falls short. |
+| **Picture filled** | How much of the picture those people fill, as a percentage, with its own dashed line. Someone can be found and still fall short here: one person at 2% of the picture does not pass a profile that asks for 20%. |
+| **Why not kept** | One colour for each second, with a key underneath: kept, kept as extra footage, other part of the jump, nobody found, too few people, people too small, match too short. This is the row that says why a moment is missing from the clips. |
 | **Agreement** | Green: motion (or sound, without motion) agrees with Final. Amber: it doesn't, so worth a look. Grey: nothing to compare. |
 | **Clips cut** | The clips each profile produced, one lane per profile. |
 
@@ -201,30 +234,36 @@ you left open.
 
 | Setting | Meaning |
 | --- | --- |
-| **Create** | **CSV files and clips**, or **CSV only - no clips** (timelines and profile matches only). |
-| **Clip folders** | **A folder per video**, **A folder per clip, grouped by video**, **All clips in one folder**, or **Same folders as the input videos** (keeps your input folder structure, for example `2024/Boogie/`). An example path is shown below it; see the [folder examples](OUTPUT_REFERENCE.md#folder-examples). |
-| **Timeline CSVs** | **In the Clips folder** (a `timelines` folder inside it, the default), or **Somewhere else**: choose any folder with **Browse...** or drag one onto the box. In CSV-only mode there is no Clips folder, so a CSV folder is required. |
+| **What to produce** | **Clips and timelines**, or **Timelines only - no clips** (timelines and profile matches only). |
+| **Organise clips** | **A folder per video**, **A folder per clip, grouped by video**, **All clips in one folder**, or **Same folders as the input videos** (keeps your input folder structure, for example `2024/Boogie/`). An example path is shown below it; see the [folder examples](OUTPUT_REFERENCE.md#folder-examples). |
+| **Save timelines to** | **In the clips folder** (a `timelines` folder inside it, the default), or **Somewhere else**: choose any folder with **Browse...** or drag one onto the box. With timelines only there is no clips folder, so a folder is required. |
 
 **Processing**
 
 | Setting | Meaning |
 | --- | --- |
-| **Identify jump phases** | Turn phase classification off to cut by people only. |
-| **Process on** | **Automatic** (NVIDIA GPU if available), **NVIDIA GPU**, or **Processor only**. |
-| **Batch size** | Video windows per GPU batch. Lower it if a small graphics card runs out of memory. |
-| **360 videos** | Which side of a 360 camera to use: **Front view only** (the default), **Front view, people counted all round**, or **Back view only**. Ordinary cameras ignore it. See [360 footage](#360-footage). |
+| **Work out the parts of each jump** | Turn it off to cut by people only. |
+| **Run on** | **Automatic** (NVIDIA GPU if available), **NVIDIA GPU**, or **Processor only**. |
+| **Videos at once** | **1** (the default), **2**, **3**, **4** or **Automatic**. More is faster when the machine has spare processor cores and graphics memory. Automatic starts with one and adds another only while the processor, memory and graphics card have room; it never stops a video that is running. Each video in progress gets its own progress bar. The results are the same however many run together. |
+| **Read videos with** | **Automatic** unpacks each video on the graphics card when that works for the file, and on the processor otherwise. The picture is identical either way. **Processor only** is there in case of a graphics driver problem. |
+| **Graphics memory use (batch size)** | Video windows per GPU batch. Lower it if a small graphics card runs out of memory. |
+| **360 camera footage** | Which side of a 360 camera to use: **Front view only** (the default), **Front view, people counted all round**, or **Back view only**. Ordinary cameras ignore it. See [360 footage](#360-footage). |
 | **Re-cut a video as soon as you mark it reviewed** | On by default. Off: reviews are used the next time you click Process videos. |
 
 **People**
 
 | Setting | Meaning |
 | --- | --- |
-| **Count people and measure total frame coverage** | On by default. The detector is installed with the app; if it goes missing this section turns red. |
-| **Samples per second** | How often frames are checked for people. Default 1. |
-| **Detection threshold** | Minimum detector score to accept a person, 0 to 1. Default 0.35. |
+| **Look for people in the picture** | On by default. The detector is installed with the app; if it goes missing this section turns red. |
+| **Person detector** | Which model finds the people. **Standard** comes with the app and is small and fast. Larger detectors find more skydivers, especially at a distance or in odd positions; they are listed when their file (for example `yolo26x.pt`) is in the app folder. Changing it counts people again on finished videos. |
+| **Checks per second** | How often the video is looked at for people, and how finely clips can start and end. Default 1. |
+| **How sure it must be that it is a person (0 to 1)** | The lowest detector score accepted. Lower counts more distant or half-hidden people and more mistakes; higher misses more. Default 0.35. |
 
-Person area uses rectangular boxes. Total area adds the boxes, so overlaps can exceed 100%. Hover over **Create** and
-**Clip folders** for more detail.
+Person area uses rectangular boxes. Total area adds the boxes, so overlaps can exceed 100%. Click the **?** beside
+any setting for more detail.
+
+Each video's picture is read once: the same read counts the people and makes the small copy the phase model looks at.
+When a video finishes, the log says how long each step took.
 
 ## 360 footage
 

@@ -93,7 +93,9 @@ class TestFingerprint:
     def test_preferences_never_reprocess(self, field_name):
         values = {'input_folder': 'C:/elsewhere', 'poll_seconds': 30.0, 'keep_watching': True,
                   'recut_on_review': False, 'window_geometry': 'AAA', 'column_state': 'BBB',
-                  'open_sections': ('output',), 'device': 'cpu', 'batch_size': 2}
+                  'open_sections': ('output',), 'device': 'cpu', 'batch_size': 2,
+                  'hardware_decode': 'off', 'parallel_videos': 3, 'mode': 'advanced',
+                  'advanced_enabled': ('Mine',)}
         changed = replace(self.base, **{field_name: values[field_name]})
         assert settings_fingerprint(changed) == settings_fingerprint(self.base)
 

@@ -125,7 +125,7 @@ class TestDamagedState:
 class TestSphericalFootage:
     def test_two_lens_tracks_are_recognised(self, spherical_video, ffmpeg):
         from app.ffmpeg_tools import find_executable
-        from cutter_v4.engine import has_back_view, probe, video_map
+        from cutter_v4.media import has_back_view, probe, video_map
         media = probe(spherical_video(), find_executable('ffprobe'))
         assert media['kind'] == 'max_dual' and media['video_stream_count'] == 2
         assert has_back_view(media)
@@ -143,7 +143,7 @@ class TestSphericalFootage:
 
     def test_an_ordinary_video_has_no_back_view(self, folders, make_video):
         from app.ffmpeg_tools import find_executable
-        from cutter_v4.engine import has_back_view, probe
+        from cutter_v4.media import has_back_view, probe
         media = probe(make_video('flat.mp4'), find_executable('ffprobe'))
         assert media['kind'] == 'flat' and not has_back_view(media)
 
@@ -154,7 +154,7 @@ class TestPeopleFiltering:
     def fake_people(self, monkeypatch, counts):
         from app.people import PeopleSampler
 
-        def sample(self, source, duration, settings, runner, media=None):
+        def sample(self, source, duration, settings, runner, media=None, proxy=None):
             return [{'time_sec': t + .5, 'person_count': counts[t], 'largest_person_area_percent': 10.0 * counts[t],
                      'total_person_area_percent': 25.0 * counts[t]} for t in range(len(counts))]
         monkeypatch.setattr(PeopleSampler, 'sample', sample)

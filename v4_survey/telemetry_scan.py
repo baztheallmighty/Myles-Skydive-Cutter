@@ -4,6 +4,7 @@ Parses the MP4/MOV box structure directly and reads only the index (moov) plus t
 to - never the video frames. Decodes GoPro GPMF ('gpmd': ACCL, GYRO, GPS5, GPSF), CAMM ('camm' accelerometer) and DJI
 'djmd' (Osmo Action 4 layout: an acceleration vector in g at protobuf field 3.2.10, one per frame, read about ten times
 a second), and records other metadata tracks (DJI 'dbgi', Apple 'mebx', timecode) by presence and sample count.
+Insta360 '.insv' keeps its motion data in a trailer after the MP4 boxes instead of a track; only that trailer is read.
 Writes two CSVs outside the corpus: one row per file, and one row per second of motion data (mean, max and spread of
 acceleration magnitude in m/s^2, gyro magnitude, and GPS altitude/speed when there is a fix).
 Standard library only, so it runs on the worker's system Python.
@@ -19,12 +20,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-ISOBMFF = {'.mp4', '.mov', '.360', '.m4v', '.3gp'}
+ISOBMFF = {'.mp4', '.mov', '.360', '.m4v', '.3gp', '.insv'}
 DECODED = {'gpmd', 'camm', 'djmd'}
 COUNTED = {'dbgi', 'mebx', 'tmcd', 'fdsc', 'rtmd'}
 MAX_MOOV_BYTES = 256 * 1024 * 1024
 DJI_RATE_HZ = 10
 STANDARD_GRAVITY = 9.80665
+INSTA360_MAGIC = b'8db42d694ccc418790edff439fe026bf'
+INSTA360_MAX_BYTES = 256 * 1024 * 1024
+INSTA360_RATE_HZ = 200                               # averaged down to GoPro's rate, so spread and peak compare
+INSTA360_ACCEL = STANDARD_GRAVITY / 1024             # raw counts to m/s^2: +-32 g over 16 bits
+INSTA360_GYRO = math.radians(2000 / 32768)           # raw counts to rad/s: +-2000 deg/s over 16 bits
 NUMERIC = {ord('b'): 'b', ord('B'): 'B', ord('s'): 'h', ord('S'): 'H', ord('l'): 'i', ord('L'): 'I',
            ord('f'): 'f', ord('d'): 'd', ord('j'): 'q', ord('J'): 'Q'}
 FILE_FIELDS = ['rel_path', 'extension', 'status', 'metadata_tracks', 'gpmd_samples', 'accel_samples', 'accel_hz',
@@ -247,6 +253,75 @@ def dji_acceleration(payload):
     return math.sqrt(sum(axes.get(k, 0.) ** 2 for k in (2, 3, 4))) * STANDARD_GRAVITY
 
 
+def insta360_records(handle, size):
+    """Where each record of an Insta360 trailer sits, as {id: (offset, length)}; empty when the file has no trailer.
+
+    The file ends with a fixed marker. Before it, every record is followed by its own id and length, so they are
+    walked backwards from the end. Newer cameras (seen on the X5) put an index last, as record 0, and pad between the
+    others, so the index is used when there is one.
+    """
+    if size < 78:
+        return {}
+    handle.seek(size - 78)
+    tail = handle.read(78)
+    if not tail.endswith(INSTA360_MAGIC):
+        return {}
+    start = size - struct.unpack_from('<I', tail, 38)[0]
+    records, pos = {}, size - 78
+    while pos >= max(start, 0):
+        handle.seek(pos)
+        kind, length = struct.unpack('<HI', handle.read(6))
+        begin = pos - length
+        if begin < start or not (kind or length):
+            break
+        records.setdefault(kind, (begin, length))
+        pos = begin - 6
+    if 0 in records:
+        handle.seek(records[0][0])
+        index = handle.read(records[0][1])
+        for at in range(0, len(index) - 9, 10):
+            major, minor, length, offset = struct.unpack_from('<BBII', index, at)
+            if length and start + offset + length <= size:
+                records[major << 8 | minor] = (start + offset, length)
+    return records
+
+
+def insta360_motion(handle, size):
+    """Acceleration (m/s^2) and rotation (rad/s) vectors from an Insta360 trailer, as two lists of (seconds, (x, y, z)).
+
+    Record 0x300 holds one 20-byte sample per millisecond: a timestamp in microseconds on the camera's clock, then
+    acceleration and rotation as three unsigned 16-bit values each, offset by 32768. Record 0x400 holds each frame's
+    timestamp on the same clock, so its first entry is the video's zero. Samples are averaged, as vectors, down to
+    about INSTA360_RATE_HZ. Layouts this does not recognise (older cameras store 56-byte samples) return nothing.
+    """
+    records = insta360_records(handle, size)
+    begin, length = records.get(0x300, (0, 0))
+    if not length or length % 20 or length > INSTA360_MAX_BYTES:
+        return [], []
+    handle.seek(begin)
+    samples = list(struct.iter_unpack('<Q6H', handle.read(length)))
+    if len(samples) < 2:
+        return [], []
+    step = (samples[-1][0] - samples[0][0]) / (len(samples) - 1)
+    if not 200 <= step <= 20000:  # microseconds between samples: anything else is not this layout
+        return [], []
+    zero = samples[0][0]
+    if records.get(0x400, (0, 0))[1] >= 16:
+        handle.seek(records[0x400][0])
+        zero = struct.unpack('<Q', handle.read(8))[0]
+    block = max(1, round(1e6 / step / INSTA360_RATE_HZ))
+    accel, gyro = [], []
+    for at in range(0, len(samples) - block + 1, block):
+        chunk = samples[at:at + block]
+        t = (chunk[block // 2][0] - zero) / 1e6
+        if t < 0:
+            continue
+        mean = [sum(sample[k] for sample in chunk) / block - 32768 for k in range(1, 7)]
+        accel.append((t, tuple(v * INSTA360_ACCEL for v in mean[:3])))
+        gyro.append((t, tuple(v * INSTA360_GYRO for v in mean[3:])))
+    return accel, gyro
+
+
 def scan(root, rel):
     path = root.joinpath(*rel.split('/'))
     row = {'rel_path': rel, 'extension': path.suffix.lower()}
@@ -256,6 +331,13 @@ def scan(root, rel):
     try:
         with path.open('rb') as handle:  # read-only
             size = path.stat().st_size
+            if row['extension'] == '.insv':
+                vectors, rotations = insta360_motion(handle, size)
+                accel = [(t, math.sqrt(sum(a * a for a in v))) for t, v in vectors]
+                gyro = [(t, math.sqrt(sum(a * a for a in v))) for t, v in rotations]
+                row.update(status='ok', metadata_tracks='insta360' if accel else '',
+                           accel_samples=len(accel) or '', gyro_samples=len(gyro) or '')
+                return summarise(rel, row, accel, gyro, gps)
             moov = find_top_box(handle, size, 'moov')
             if not moov:
                 return {**row, 'status': 'no_index'}, []
@@ -315,7 +397,11 @@ def scan(root, rel):
                        dbgi_samples=counts['dbgi'] or '', mebx_samples=counts['mebx'] or '')
     except Exception as exc:
         return {**row, 'status': 'error', 'error': f'{type(exc).__name__}: {exc}'[:200]}, []
+    return summarise(rel, row, accel, gyro, gps)
 
+
+def summarise(rel, row, accel, gyro, gps):
+    """The file row completed, and one row per second of whatever was found."""
     seconds = defaultdict(lambda: {'accel': [], 'gyro': [], 'gps': []})
     for t, v in accel:
         seconds[int(t)]['accel'].append(v)

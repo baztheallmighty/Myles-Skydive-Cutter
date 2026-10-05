@@ -6,8 +6,8 @@ from pathlib import Path
 from app.ffmpeg_tools import find_executable
 from app.profiles import profile_spans
 from app.timeline import write_atomic_csv
-from app.outputs import (clip_destination, clip_manifest, clip_suffix, owned_clip, reserve_identity,
-                         source_folder, thumbnail_path)
+from app.outputs import (clip_destination, clip_manifest, clip_suffix, owned_clip, plain_name, profile_root,
+                         reserve_identity, source_folder, thumbnail_path)
 from app.runtime import Cancelled
 from app.spans import clip_filename, dominant_phase, slugify
 from v3_poc.common import key
@@ -42,11 +42,16 @@ def ffmpeg_argv(ffmpeg, source, start, end, destination):
 def plan_clips(source, rows, duration, profile, settings, identity):
     clips = []
     folder = source_folder(source, settings.input_folder) if settings.output_layout == 'mirror' else ''
-    for index, (start, end) in enumerate(profile_spans(profile, rows, duration,
-            settings.phases_enabled, settings.people_enabled), 1):
+    spans = profile_spans(profile, rows, duration, settings.phases_enabled, settings.people_enabled)
+    plain = True
+    if settings.output_layout == 'by_profile' and spans:
+        from app.settings import state_directory
+        plain = plain_name(state_directory(settings), source, identity.output_name)
+    for index, (start, end) in enumerate(spans, 1):
         phase = dominant_phase(rows, start, end) if settings.phases_enabled else 'all'
-        path = clip_destination(settings.output_folder, settings.output_layout, identity.output_name,
-                                profile.name, index, start, end, phase, folder=folder, source=source)
+        path = clip_destination(profile_root(settings, profile), settings.output_layout, identity.output_name,
+                                profile.name, index, start, end, phase, folder=folder, source=source,
+                                total=len(spans), plain=plain)
         clips.append(dict(clip_index=index, clip_path=str(path), source_video=str(source),
                           profile=profile.name, start_sec=start, end_sec=end,
                           duration_sec=end - start, dominant_phase=phase,
@@ -70,7 +75,7 @@ def cut_profiles(source, rows, duration, settings, runner, identity):
                 old = list(csv.DictReader(stream))
             validate_manifest_owner(old, source, identity)
         owned = {Path(r['clip_path']).resolve() for r in old if owned_clip(
-            r, settings.output_folder, settings.output_layout, identity, profile.name)}
+            r, profile_root(settings, profile), settings.output_layout, identity, profile.name, total=len(old))}
         for clip in clips:
             candidate = Path(clip['clip_path'])
             if candidate.exists() and candidate.resolve() not in owned:

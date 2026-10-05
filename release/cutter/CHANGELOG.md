@@ -1,5 +1,78 @@
 # Changelog
 
+## 2.5.0 (October 2026)
+
+Faster processing, several videos at once, and an explanation beside every setting.
+
+- **A Basic screen.** Two folders and three choices: Trim my footage (with an optional landing), A grade for day
+  tape (with optional canopy), and B grade. Any or all run together, each into its own folder, with clips named
+  after the video they came from. A new install opens here; an existing one opens on Advanced as before.
+- **Safer and clearer to use.** The mouse wheel no longer changes a drop-down or number it happens to pass over
+  while you scroll the settings; click one first to change it with the wheel. Profiles in use are highlighted, with
+  a sentence under the list saying what a run will keep. Long help notes no longer lose their last lines, and a
+  help button returns to normal after its note closes.
+- **Results list:** select several videos (Ctrl, Shift, or Ctrl+A) and process them again together; click a column
+  title to sort; columns fit the list and can be dragged to resize.
+- **Videos at once goes up to 10**, then Automatic.
+- **The three choices are built-in profiles** on the Advanced screen, editable like any other.
+- **A folder per profile.** New way to organise clips, and a "Folder" field on each profile: a name inside the clips
+  folder, or a full path to put that profile's clips anywhere.
+- **About twice as fast again, with the same results.** Measured on 24 jump videos (62 minutes, mostly 4K60): a fast
+  PC went from 15.3 to 7.6 minutes one at a time and 3.5 minutes four at once; a GTX 1060 laptop went from 38.4 to
+  25.7 minutes, and 17.2 two at once. Every timeline is identical to before. Frames the models do not need are
+  dropped on the graphics card before being copied back; the classifier loads and analyses sound while the picture is
+  being read; and a new video's checksum is worked out alongside, which matters on a hard disk.
+- **Fixed: several videos at once on a fresh install broke sound analysis for good.** The first run filled a compile
+  cache from several classifiers at once and left it damaged, after which every video failed. One classifier now
+  fills it while the others wait, and a cache nobody vouches for is rebuilt.
+- **Changing a profile no longer reads the video again.** The people already counted are reused when the file, the
+  detector and its settings are the same.
+- **Older FFmpeg is handled** (before 5.1 an option had another name).
+- **Each video's picture is read once, not twice.** Counting people and working out the parts of the jump used to
+  unpack the video separately. One read now feeds both. On a 3-minute 1080p60 video on the test PC, reading went from
+  48 s to 22 s. The copy the phase model looks at is identical, frame for frame, so the phases do not change.
+- **The graphics card unpacks the video when it can.** New setting, Advanced settings > Processing > **Read videos
+  with**. Automatic tries the graphics card on each video and uses the processor if that fails, including part-way
+  through. The picture is identical either way.
+- **Several videos at once.** New setting, **Videos at once**: 1 (the default), 2, 3, 4 or Automatic. Automatic adds
+  a video only while the processor, memory and graphics card have room. Each video in progress has its own progress
+  bar, and Stop finishes or cancels all of them. Results are the same however many run together.
+- **A "?" beside every setting**, with a plain explanation and a warning where a change goes through finished videos
+  again. Several settings are renamed to say what they do: for example "Detection threshold" is now "How sure it must
+  be that it is a person", and "Bridge non-matching dips" is "Join matches separated by up to".
+- **"People in view" says it includes you.** Under canopy and on landing your own legs or arms count as a person.
+  The profile editor now says so beside the number when it applies, and writes out in one sentence what the profile
+  keeps.
+- **People are counted on the exact frame for each second.** The old reader occasionally returned a different frame
+  on 10-bit DJI video, and 360 footage was looked at half a second early. On the DJI test video this changes whether
+  the default profile matches on 7 of 192 seconds; on the GoPro test video nothing changes. Finished videos are not
+  reprocessed for this; it applies to videos processed from now on.
+- **Review shows people as two things, and says why a moment was left out.** "People found" (the count) and
+  "Picture filled" (the percentage) are separate rows, each with its own bar to clear, and a new "Why not kept" row
+  gives the reason for every second: nobody found, too few people, people too small, and so on. Each row prints its
+  value at the playback position, and the readout beside the mouse now updates as you move (it used to appear once).
+  With several profiles in use, a drop-down chooses which one the rows are judged against.
+- **A join that asks who is still there.** Two new profile settings: "Join gaps while people are still in view, up
+  to (seconds)" and "People still in view means at least". A gap between two matches is filled while enough people
+  are still found, however small they are in the picture; a short look-away inside it is allowed up to the ordinary
+  join. Off by default, and upgrading reprocesses nothing. Review marks these seconds "joined: people still in view".
+- **A choice of person detector.** Advanced settings > People > **Person detector** lists the detectors whose files
+  are in the app folder. On two test jumps the largest (`yolo26x.pt`) found two or more people on 93% of exit and
+  freefall seconds against 70% for the standard one. The installer still fetches only the standard detector.
+- **Insta360 X5 motion data is read** (`.insv`), for the motion check. The app does not yet take `.insv` as input.
+- **The log says where the time went** for every video: checking, reading and counting people, phases, cutting.
+
+## 2.4.3 (September 2026)
+
+Installs on Intel Macs. No change to the app or its results on any computer.
+
+- **Intel Mac setup no longer stops at "Motion model missing".** The motion model carried a leftover from its
+  training, a random-number generator in a form only NumPy 2 can read, and Intel Macs have to use NumPy 1.26 (the
+  last PyTorch for Intel Macs needs it). Every Intel Mac install since 2.4.0 failed at the final check with "motion
+  model unavailable (ValueError)". The model is saved again without it. It gives identical answers: every prediction
+  on 5,000 test inputs matches 2.4.2 exactly, under both NumPy 1.26 and NumPy 2.
+- A new check stops any release whose models NumPy 1.26 could not load.
+
 ## 2.4.2 (September 2026)
 
 A dropped connection during setup no longer leaves a PC with a good NVIDIA GPU on the processor. Every download now

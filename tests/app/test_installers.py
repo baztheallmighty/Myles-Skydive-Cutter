@@ -75,6 +75,22 @@ class TestLocks:
 
 
 class TestThePackage:
+    def test_every_pickled_model_loads_on_the_intel_macs_numpy(self):
+        """Intel Macs must use NumPy 1.26, which cannot read a random generator pickled by NumPy 2.
+
+        The motion model shipped one from 2.4.0 to 2.4.2 (left over from fitting; predicting never uses it) and failed
+        every Intel Mac install with 'motion model unavailable (ValueError)'. Nothing else NumPy 2 writes into these
+        files has been a problem, so this looks for exactly that, with no extra libraries needed to run it.
+        """
+        import zlib
+        for path in (ROOT / 'cutter_v4' / 'models').glob('*.joblib'):
+            raw = path.read_bytes()
+            assert not raw.startswith(b'version https://git-lfs'), f'{path.name} is a Git LFS pointer: git lfs pull'
+            data = zlib.decompress(raw) if raw[:1] == b'\x78' else raw
+            assert b'numpy.random' not in data, (
+                f'{path.name} carries a NumPy random generator, which NumPy 1.26 on Intel Macs cannot load. '
+                'Clear it before saving (see cutter_v4/build_models.py in the research repository).')
+
     def test_the_licence_travels_with_it(self):
         """GPL-3.0 software has to ship its licence. 2.3.2's Mac ZIP went out without one after the file went missing."""
         licence = (WINDOWS / 'LICENSE').read_text(encoding='utf-8')

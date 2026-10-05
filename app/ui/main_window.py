@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
     QPushButton, QProgressBar, QScrollArea, QSpinBox, QApplication, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton,
@@ -18,9 +19,13 @@ from app.outputs import OUTPUT_LAYOUTS, layout_example, source_label
 from app.progress import QueueProgress, video_progress
 from app.runtime import Cancelled
 from app.system import device_choices, installer_argv, visible_console
-from app.settings import (VIEW_MODES, KeepProfile, Settings, load_settings, profile_presets, save_settings,
-                          state_directory, validate_settings)
+from app.settings import (A_CANOPY, A_GRADE, B_GRADE, LANDING, MAX_PARALLEL_VIDEOS, MOST_SECONDS_EITHER_SIDE, TRIM,
+                          VIEW_MODES, KeepProfile, Settings, available_detectors, built_in_profiles, load_settings,
+                          profile_presets, save_settings, state_directory, validate_settings, with_built_ins)
+from app import help_text
+from app.ui.help import HelpButton, with_help
 from app.ui.profile_editor import ProfileEditor, decimal_spin
+from app.ui.theme import GOOD_BACKGROUND, MUTED
 from app.ui.review_tab import ReviewTab
 from app.ui.results import ResultsPanel
 from app import PROJECT_ROOT
@@ -33,27 +38,30 @@ from v3_poc.common import RunLock, key
 
 
 class VideoWorker(QThread):
-    log = Signal(str)
-    outcome = Signal(str, object)
-    progress = Signal(str, float, float)
+    """One video on its own thread. ``slot`` is which of the side-by-side places it holds; every signal carries it."""
+    log = Signal(int, str)
+    outcome = Signal(int, str, object)
+    progress = Signal(int, str, float, float)
 
-    def __init__(self, processor, source, signature, previous_entry=None, parent=None, moved_from=()):
+    def __init__(self, processor, source, signature, previous_entry=None, parent=None, moved_from=(), slot=0):
         super().__init__(parent)
         self.processor, self.source, self.signature = processor, source, signature
         self.previous_entry = previous_entry
         self.moved_from = moved_from
+        self.slot = slot
+        self.started_at = time.monotonic()
 
     def run(self):
-        self.processor.runner.log = self.log.emit
-        self.processor.runner.progress = self.progress.emit
+        self.processor.runner.log = lambda message: self.log.emit(self.slot, message)
+        self.processor.runner.progress = lambda stage, done, total: self.progress.emit(self.slot, stage, done, total)
         try:
             result = self.processor.process(self.source, self.signature, self.previous_entry,
                                             moved_from=self.moved_from)
-            self.outcome.emit('success', result)
+            self.outcome.emit(self.slot, 'success', result)
         except Cancelled as exc:
-            self.outcome.emit('cancelled', {'error': str(exc)})
+            self.outcome.emit(self.slot, 'cancelled', {'error': str(exc)})
         except Exception as exc:
-            self.outcome.emit('failed', {'error': f'{type(exc).__name__}: {exc}'})
+            self.outcome.emit(self.slot, 'failed', {'error': f'{type(exc).__name__}: {exc}'})
 
 
 class Section(QFrame):
@@ -116,7 +124,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('Skydive Cutter')
         self.setMinimumSize(1120, 720)
         self.setAcceptDrops(True)
-        self.worker = None
+        self.workers = {}     # the videos in progress, by which side-by-side place each holds
+        self.pacer = None     # with "Videos at once: Automatic", decides when the machine has room for another
         self.session = None   # the run in progress (app/session.py); the window only drives it
         self.active = False
         self.stopping = False
@@ -129,7 +138,17 @@ class MainWindow(QMainWindow):
         except (ValueError, TypeError, KeyError, OSError, AttributeError) as exc:
             self.settings = Settings()
             self.settings_error = f'Could not load settings; defaults shown: {exc}'
-        self.profiles = list(self.settings.profiles)
+        # Basic mode is three ticks against the built-in profiles; advanced mode shows every profile. One list serves
+        # both, so the built-in ones are always in it.
+        fresh = not any(p.name in built_in_profiles() for p in self.settings.profiles)
+        self.profiles = list(with_built_ins(self.settings.profiles))
+        self.mode = self.settings.mode
+        self.advanced_names = list(self.settings.advanced_enabled)
+        if self.mode == 'basic':
+            self.leave_advanced()
+            if fresh:   # a first run: trimming is the thing most people came for, and nothing else is in use
+                self.set_built_in(TRIM, enabled=True)
+                self.advanced_names = []
         self.restore_window()
         self.health_checks = []
         self.installer = None
@@ -144,11 +163,217 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.review_tab, 'Review')
         self.tabs.currentChanged.connect(self.tab_changed)
         self.build_health_banner()
+        self.build_mode_switch()
         self.build_columns()
         self.build_folders()
+        self.build_basic()
         self.build_profiles()
         self.build_advanced()
         self.build_actions()
+        self.show_mode()
+
+    # --- basic and advanced: two screens over the same profiles ---------------------------------------------------
+    def build_mode_switch(self):
+        row = QHBoxLayout()
+        self.mode_buttons = {}
+        for mode, label, tip in (('basic', 'Basic', 'Three choices and two folders. Nothing else to set.'),
+                                 ('advanced', 'Advanced', 'Every profile and every setting.')):
+            button = QPushButton(label)
+            button.setObjectName('modeBasic' if mode == 'basic' else 'modeAdvanced')
+            button.setCheckable(True)
+            button.setToolTip(tip)
+            button.clicked.connect(lambda checked=False, m=mode: self.set_mode(m))
+            self.mode_buttons[mode] = button
+            row.addWidget(button)
+        row.addStretch()
+        self.outer.addLayout(row)
+
+    def profile_named(self, name):
+        return next((p for p in self.profiles if p.name == name), None)
+
+    def set_built_in(self, name, **changes):
+        """Change one built-in profile in place; it is put back if it was removed."""
+        for index, profile in enumerate(self.profiles):
+            if profile.name == name:
+                self.profiles[index] = replace(profile, **changes)
+                return
+        self.profiles.append(replace(built_in_profiles()[name], **changes))
+
+    def leave_advanced(self):
+        """Basic mode runs only the built-in profiles: the others are switched off, and remembered for coming back."""
+        built = built_in_profiles()
+        own = [p.name for p in self.profiles if p.enabled and p.name not in built]
+        if own:
+            self.advanced_names = own
+        self.profiles = [p if p.name in built else replace(p, enabled=False) for p in self.profiles]
+
+    def set_mode(self, mode):
+        if mode != self.mode:
+            if mode == 'basic':
+                self.leave_advanced()
+            else:   # the profiles that were in use the last time this screen was showing come back on
+                self.profiles = [replace(p, enabled=True) if p.name in self.advanced_names else p
+                                 for p in self.profiles]
+            self.mode = mode
+            self.refresh_profiles()
+        self.show_mode()
+
+    def show_mode(self):
+        basic = self.mode == 'basic'
+        for mode, button in self.mode_buttons.items():
+            button.setChecked(mode == self.mode)
+        self.basic_panel.setVisible(basic)
+        self.profile_group.setVisible(not basic)
+        self.advanced_toggle.setVisible(not basic)
+        self.advanced.setVisible(not basic and self.advanced_toggle.isChecked())
+        self.load_basic()
+        self.update_gates()
+
+    def build_basic(self):
+        """Three boxes, one per built-in choice, with the only settings a first run could want."""
+        self.basic_panel = QWidget()
+        box = QVBoxLayout(self.basic_panel)
+        box.setContentsMargins(0, 4, 0, 4)
+        box.setSpacing(8)
+        self.cards = {}
+
+        def card(key, name, help_key, words):
+            frame = QFrame()
+            frame.setObjectName(name)
+            inner = QVBoxLayout(frame)
+            inner.setContentsMargins(14, 10, 10, 10)
+            head = QHBoxLayout()
+            tick = QCheckBox(help_text.label(help_key))
+            tick.setObjectName('cardTitle')
+            tick.toggled.connect(self.basic_changed)
+            head.addWidget(tick)
+            head.addStretch()
+            changed = QLabel('Changed in advanced mode')
+            changed.setObjectName('hint')
+            reset = QPushButton('Put back')
+            reset.setObjectName('chip')
+            reset.setToolTip('Return this choice to its built-in settings.')
+            reset.clicked.connect(lambda checked=False, k=key: self.reset_built_in(k))
+            head.addWidget(changed)
+            head.addWidget(reset)
+            head.addWidget(HelpButton(help_key))
+            inner.addLayout(head)
+            said = QLabel(words)
+            said.setObjectName('hint')
+            said.setWordWrap(True)
+            inner.addWidget(said)
+            self.cards[key] = {'tick': tick, 'changed': changed, 'reset': reset, 'frame': frame, 'layout': inner}
+            box.addWidget(frame)
+            return inner
+
+        def seconds(value):
+            spin = decimal_spin(value, maximum=MOST_SECONDS_EITHER_SIDE)
+            spin.setDecimals(1)
+            spin.setSingleStep(.5)
+            spin.setFixedWidth(70)
+            spin.valueChanged.connect(self.basic_changed)
+            return spin
+
+        inner = card(TRIM, 'cardTrim', 'basic_trim',
+                     'Just the jump: from before exit until the canopy is open. Everything else is cut away.')
+        row = QHBoxLayout()
+        self.trim_before = seconds(2.0)
+        row.addWidget(QLabel('Start'))
+        row.addWidget(self.trim_before)
+        row.addWidget(QLabel('seconds before exit'))
+        row.addStretch()
+        inner.addLayout(row)
+        row = QHBoxLayout()
+        self.trim_landing = QCheckBox('Also keep the landing, with')
+        self.trim_landing.toggled.connect(self.basic_changed)
+        self.landing_seconds = seconds(5.0)
+        row.addWidget(self.trim_landing)
+        row.addWidget(self.landing_seconds)
+        row.addWidget(QLabel('seconds either side'))
+        row.addStretch()
+        inner.addLayout(row)
+
+        inner = card(A_GRADE, 'cardA', 'basic_a',
+                     'The good stuff: someone close to the camera (1 person, 20% of the picture), from exit to the '
+                     'end of break-off.')
+        self.a_canopy = QCheckBox('Include canopy flight with others in view (2 people, 20% of the picture)')
+        self.a_canopy.toggled.connect(self.basic_changed)
+        inner.addWidget(self.a_canopy)
+
+        card(B_GRADE, 'cardB', 'basic_b',
+             'A grade plus looser footage: people fill 10% of the picture, and gaps are joined when the camera '
+             'wanders.')
+        self.basic_note = QLabel('Each choice gets its own folder inside your clips folder (Trimmed, A grade, B grade), '
+                                 'with clips named after the video they came from.')
+        self.basic_note.setObjectName('hint')
+        self.basic_note.setWordWrap(True)
+        box.addWidget(self.basic_note)
+        self.column.addWidget(self.basic_panel)
+
+    def load_basic(self):
+        """Show the built-in profiles' state in the boxes."""
+        widgets = [card['tick'] for card in self.cards.values()] + [self.trim_before, self.trim_landing,
+                                                                    self.landing_seconds, self.a_canopy]
+        for widget in widgets:
+            widget.blockSignals(True)
+        named = {name: self.profile_named(name) or built_in_profiles()[name] for name in built_in_profiles()}
+        for name, card in self.cards.items():
+            card['tick'].setChecked(named[name].enabled)
+        self.trim_before.setValue(min(MOST_SECONDS_EITHER_SIDE, named[TRIM].margin_before_seconds))
+        self.trim_landing.setChecked(named[LANDING].enabled and named[TRIM].enabled)
+        self.landing_seconds.setValue(min(MOST_SECONDS_EITHER_SIDE, named[LANDING].margin_before_seconds))
+        self.a_canopy.setChecked(named[A_CANOPY].enabled and named[A_GRADE].enabled)
+        for widget in widgets:
+            widget.blockSignals(False)
+        self.update_basic()
+
+    def update_basic(self):
+        """Grey out a box's own settings while it is unticked, and say when a choice is no longer the built-in one."""
+        trim, a_grade = self.cards[TRIM]['tick'].isChecked(), self.cards[A_GRADE]['tick'].isChecked()
+        for widget in (self.trim_before, self.trim_landing):
+            widget.setEnabled(trim)
+        self.landing_seconds.setEnabled(trim and self.trim_landing.isChecked())
+        self.a_canopy.setEnabled(a_grade)
+        for name, card in self.cards.items():
+            changed = self.customised(name)
+            card['changed'].setVisible(changed)
+            card['reset'].setVisible(changed)
+
+    def customised(self, name):
+        """True when a built-in profile, or its companion, no longer has its built-in settings.
+
+        Whether it is in use, and the seconds basic mode itself offers, are not counted as changes.
+        """
+        own = {'enabled': True, 'margin_before_seconds': 0.0, 'margin_after_seconds': 0.0}
+        for each in {TRIM: (TRIM, LANDING), A_GRADE: (A_GRADE, A_CANOPY), B_GRADE: (B_GRADE,)}[name]:
+            now = self.profile_named(each)
+            fixed = dict(own) if each in (TRIM, LANDING) else {'enabled': True}
+            if each == TRIM:
+                fixed.pop('margin_after_seconds')
+            if now is not None and replace(now, **fixed) != replace(built_in_profiles()[each], **fixed):
+                return True
+        return False
+
+    def reset_built_in(self, name):
+        for each in {TRIM: (TRIM, LANDING), A_GRADE: (A_GRADE, A_CANOPY), B_GRADE: (B_GRADE,)}[name]:
+            now = self.profile_named(each)
+            fresh = {k: v for k, v in built_in_profiles()[each].__dict__.items() if k != 'name'}
+            self.set_built_in(each, **{**fresh, 'enabled': bool(now and now.enabled)})
+        self.refresh_profiles()
+        self.load_basic()
+
+    def basic_changed(self, *_):
+        """A box was ticked or a number changed: write it into the built-in profiles."""
+        trim, a_grade = self.cards[TRIM]['tick'].isChecked(), self.cards[A_GRADE]['tick'].isChecked()
+        either_side = self.landing_seconds.value()
+        self.set_built_in(TRIM, enabled=trim, margin_before_seconds=self.trim_before.value())
+        self.set_built_in(LANDING, enabled=trim and self.trim_landing.isChecked(),
+                          margin_before_seconds=either_side, margin_after_seconds=either_side)
+        self.set_built_in(A_GRADE, enabled=a_grade)
+        self.set_built_in(A_CANOPY, enabled=a_grade and self.a_canopy.isChecked())
+        self.set_built_in(B_GRADE, enabled=self.cards[B_GRADE]['tick'].isChecked())
+        self.refresh_profiles()
+        self.update_basic()
 
     def build_health_banner(self):
         """The banner that names anything this install is missing."""
@@ -205,7 +430,6 @@ class MainWindow(QMainWindow):
         self.splitter = splitter
         self.speed = SpeedStore(PROJECT_ROOT / 'app' / 'speed.json')
         self.prober = None
-        self.video_started = None
 
     def build_folders(self):
         """Input and Clips: the only two choices a first run needs."""
@@ -214,9 +438,9 @@ class MainWindow(QMainWindow):
         form = QFormLayout(folders)
         self.folder_edits = {}
         self.folder_buttons = {}
-        for name, label, hint in [('input_folder', 'Input videos', 'The folder with your jump videos (subfolders included)'),
-                                  ('output_folder', 'Clips', 'Where the clips go (outside the input folder)')]:
-            form.addRow(label, self.folder_row(name, hint))
+        for name, hint in [('input_folder', 'The folder with your jump videos (folders inside it are included)'),
+                           ('output_folder', 'Where the clips go (outside the videos folder)')]:
+            form.addRow(help_text.label(name), with_help(self.folder_row(name, hint), name))
         tip_row = QHBoxLayout()
         drop = QLabel('Tip: you can drag a folder from Explorer onto these boxes.')
         drop.setObjectName('hint')
@@ -225,7 +449,8 @@ class MainWindow(QMainWindow):
         self.advanced_toggle = QPushButton('Hide advanced settings')
         self.advanced_toggle.setCheckable(True)
         self.advanced_toggle.setChecked(True)
-        self.advanced_toggle.setToolTip('Output mode, clip folders, where CSVs go, processing device and more.')
+        self.advanced_toggle.setToolTip('What is produced, how clips are organised, how fast it runs, and how people '
+                                        'are counted.')
         self.advanced_toggle.toggled.connect(self.toggle_advanced)
         tip_row.addWidget(self.advanced_toggle)
         form.addRow(tip_row)
@@ -234,18 +459,21 @@ class MainWindow(QMainWindow):
     def build_profiles(self):
         """The Keep profiles table and its buttons."""
         # --- keep profiles -----------------------------------------------------------------------------------------
-        group = QGroupBox('Keep profiles')
+        self.profile_group = group = QGroupBox(help_text.label('profiles'))
         profiles_layout = QVBoxLayout(group)
         self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(['Enabled', 'Name', 'Phases', 'Min people', 'Min total area',
-                                              'Extra before / after'])
+        self.table.setHorizontalHeaderLabels(['In use', 'Name', 'Parts of the jump', 'People', 'Fill', 'Extra'])
+        self.table.verticalHeader().setVisible(False)
+        for column, name in enumerate(['enabled', 'name', 'phases', 'min_person_count', 'min_total_area_percent',
+                                       'margin_before_seconds']):
+            self.table.horizontalHeaderItem(column).setToolTip(help_text.text(name))
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.setMinimumHeight(110)
-        self.table.setMaximumHeight(150)
+        self.table.setMinimumHeight(150)
+        self.table.setMaximumHeight(240)
         self.table.cellDoubleClicked.connect(lambda *_: self.edit_profile())
         self.table.itemChanged.connect(self.profile_checked)
         profiles_layout.addWidget(self.table)
@@ -255,13 +483,20 @@ class MainWindow(QMainWindow):
             button = QPushButton(label)
             button.clicked.connect(action)
             row.addWidget(button)
-        self.preset_button = QPushButton('Add preset')
+        self.preset_button = QPushButton(help_text.label('presets'))
+        self.preset_button.setToolTip(help_text.text('presets'))
         self.preset_menu = QMenu(self.preset_button)
         self.preset_button.setMenu(self.preset_menu)
         self.preset_menu.aboutToShow.connect(self.fill_presets)
         row.addWidget(self.preset_button)
         row.addStretch()
+        row.addWidget(HelpButton('profiles'))
         profiles_layout.addLayout(row)
+        # In words, what the ticked profiles add up to: the list above says which, this says what.
+        self.keeping = QLabel()
+        self.keeping.setWordWrap(True)
+        self.keeping.setTextFormat(Qt.PlainText)
+        profiles_layout.addWidget(self.keeping)
         self.gate_note = QLabel()
         self.gate_note.setObjectName('hint')
         self.gate_note.setWordWrap(True)
@@ -284,27 +519,27 @@ class MainWindow(QMainWindow):
 
         advanced = self.sections['output'].form
         self.output_mode = QComboBox()
-        self.output_mode.addItem('CSV files and clips', True)
-        self.output_mode.addItem('CSV only - no clips', False)
+        self.output_mode.addItem('Clips and timelines', True)
+        self.output_mode.addItem('Timelines only - no clips', False)
         self.output_mode.setCurrentIndex(0 if self.settings.cut_enabled else 1)
-        advanced.addRow('Create', self.output_mode)
+        advanced.addRow(help_text.label('cut_enabled'), with_help(self.output_mode, 'cut_enabled'))
         self.output_layout = QComboBox()
         for identifier, label in OUTPUT_LAYOUTS.items():
             self.output_layout.addItem(label, identifier)
         self.output_layout.setCurrentIndex(self.output_layout.findData(self.settings.output_layout))
-        advanced.addRow('Clip folders', self.output_layout)
+        advanced.addRow(help_text.label('output_layout'), with_help(self.output_layout, 'output_layout'))
         self.layout_note = QLabel()
         self.layout_note.setObjectName('hint')
         self.layout_note.setWordWrap(False)
         self.layout_note.setTextFormat(Qt.PlainText)
         advanced.addRow(self.layout_note)
         csv_box = QVBoxLayout()
-        self.csv_in_clips = QRadioButton('In the Clips folder (a "timelines" folder)')
+        self.csv_in_clips = QRadioButton('In the clips folder (a "timelines" folder)')
         self.csv_elsewhere = QRadioButton('Somewhere else:')
         csv_box.addWidget(self.csv_in_clips)
         csv_box.addWidget(self.csv_elsewhere)
-        csv_box.addLayout(self.folder_row('csv_folder', 'Choose the folder for timeline CSVs'))
-        advanced.addRow('Timeline CSVs', csv_box)
+        csv_box.addLayout(with_help(self.folder_row('csv_folder', 'Choose the folder for timelines'), 'csv_folder'))
+        advanced.addRow(help_text.label('csv_folder'), csv_box)
         saved_csv, saved_clips = self.settings.csv_folder, self.settings.output_folder
         in_clips = not saved_csv or (bool(saved_clips) and Path(saved_csv) == Path(saved_clips) / 'timelines')
         (self.csv_in_clips if in_clips else self.csv_elsewhere).setChecked(True)
@@ -314,48 +549,63 @@ class MainWindow(QMainWindow):
         self.output_note = QLabel()  # shown as the Create box's tooltip, to keep the column short
 
         advanced = self.sections['processing'].form
-        self.phase_toggle = QCheckBox('Identify jump phases')
+        self.phase_toggle = QCheckBox(help_text.label('phases_enabled'))
         self.phase_toggle.setChecked(self.settings.phases_enabled)
-        advanced.addRow(self.phase_toggle)
+        advanced.addRow(with_help(self.phase_toggle, 'phases_enabled'))
         self.classifier = QComboBox()
         for classifier in available_classifiers():
             self.classifier.addItem(classifier.display_name, classifier.identifier)
         self.classifier.setCurrentIndex(max(0, self.classifier.findData(self.settings.phase_classifier)))
-        advanced.addRow('Classifier', self.classifier)
-        advanced.setRowVisible(self.classifier, self.classifier.count() > 1)  # nothing to choose from in the release
+        classifier_row = with_help(self.classifier, 'phase_classifier')
+        advanced.addRow(help_text.label('phase_classifier'), classifier_row)
+        advanced.setRowVisible(classifier_row, self.classifier.count() > 1)  # nothing to choose from in the release
         self.device = QComboBox()
         for value, label in device_choices():
             self.device.addItem(label, value)
         self.device.setCurrentIndex(max(0, self.device.findData(self.settings.device)))
         self.device.currentIndexChanged.connect(lambda _index: self.refresh_health())
-        advanced.addRow('Process on', self.device)
+        advanced.addRow(help_text.label('device'), with_help(self.device, 'device'))
+        self.parallel = QComboBox()
+        for count in range(1, MAX_PARALLEL_VIDEOS + 1):
+            self.parallel.addItem(str(count), count)
+        self.parallel.addItem('Automatic', 0)
+        self.parallel.setCurrentIndex(max(0, self.parallel.findData(self.settings.parallel_videos)))
+        advanced.addRow(help_text.label('parallel_videos'), with_help(self.parallel, 'parallel_videos'))
+        self.hardware_decode = QComboBox()
+        self.hardware_decode.addItem('Automatic (graphics card when it can)', 'auto')
+        self.hardware_decode.addItem('Processor only', 'off')
+        self.hardware_decode.setCurrentIndex(max(0, self.hardware_decode.findData(self.settings.hardware_decode)))
+        advanced.addRow(help_text.label('hardware_decode'), with_help(self.hardware_decode, 'hardware_decode'))
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 64)
         self.batch_size.setValue(self.settings.batch_size)
-        self.batch_size.setToolTip('Video windows per GPU batch. Lower it if a small graphics card runs out of memory.')
-        advanced.addRow('Batch size', self.batch_size)
+        advanced.addRow(help_text.label('batch_size'), with_help(self.batch_size, 'batch_size'))
         self.view_mode = QComboBox()
         for identifier, label in VIEW_MODES.items():
             self.view_mode.addItem(label, identifier)
         self.view_mode.setCurrentIndex(max(0, self.view_mode.findData(self.settings.view_mode)))
-        self.view_mode.setToolTip('GoPro MAX and other 360 cameras record all round. The front view is the one the '
-                                  'models were trained on; the back view is everything behind the camera. '
-                                  'Ordinary cameras ignore this.')
-        advanced.addRow('360 videos', self.view_mode)
-        self.recut = QCheckBox('Re-cut a video as soon as you mark it reviewed')
-        self.recut.setToolTip('On the Review tab, "Mark reviewed" and "Not skydiving" cut the video again straight away.')
+        advanced.addRow(help_text.label('view_mode'), with_help(self.view_mode, 'view_mode'))
+        self.recut = QCheckBox(help_text.label('recut_on_review'))
         self.recut.setChecked(self.settings.recut_on_review)
-        advanced.addRow(self.recut)
+        advanced.addRow(with_help(self.recut, 'recut_on_review'))
 
         advanced = self.sections['people'].form
-        self.people_toggle = QCheckBox('Count people and measure total frame coverage')
+        self.people_toggle = QCheckBox(help_text.label('people_enabled'))
         self.people_available = people_installed(self.settings)
         self.people_toggle.setChecked(self.settings.people_enabled and self.people_available)
-        advanced.addRow(self.people_toggle)
+        advanced.addRow(with_help(self.people_toggle, 'people_enabled'))
         self.sample_rate = decimal_spin(self.settings.sample_fps, maximum=60, minimum=.01)
         self.confidence = decimal_spin(self.settings.detection_confidence, maximum=1, minimum=.01)
-        advanced.addRow('Samples per second', self.sample_rate)
-        advanced.addRow('Detection threshold', self.confidence)
+        self.detector = QComboBox()
+        for label, path in available_detectors(self.settings.yolo_model):
+            self.detector.addItem(label, path)
+        using = Path(self.settings.yolo_model).name.casefold()
+        chosen = next((i for i in range(self.detector.count())
+                       if Path(self.detector.itemData(i)).name.casefold() == using), 0)
+        self.detector.setCurrentIndex(chosen)
+        advanced.addRow(help_text.label('yolo_model'), with_help(self.detector, 'yolo_model'))
+        advanced.addRow(help_text.label('sample_fps'), with_help(self.sample_rate, 'sample_fps'))
+        advanced.addRow(help_text.label('detection_confidence'), with_help(self.confidence, 'detection_confidence'))
         self.people_note = QLabel('Installed with the app. Usage statistics are switched off.')
         self.people_note.setObjectName('hint')
         self.people_note.setWordWrap(True)
@@ -380,11 +630,11 @@ class MainWindow(QMainWindow):
         self.process_button = QPushButton('Process videos')
         self.process_button.setObjectName('primary')
         self.process_button.clicked.connect(lambda: self.start_session(not self.keep_watching.isChecked()))
-        self.keep_watching = QCheckBox('Keep watching for new videos')
+        self.keep_watching = QCheckBox(help_text.label('keep_watching'))
         self.keep_watching.setChecked(self.settings.keep_watching)
-        self.keep_watching.setToolTip('After the videos already in the folder, keep processing new ones as they are '
-                                      'copied in, until you press Stop.')
+        self.keep_watching.setToolTip(help_text.text('keep_watching'))
         self.stop_button = QPushButton('Stop')
+        self.stop_button.setObjectName('stop')
         self.stop_button.clicked.connect(self.stop_session)
         self.stop_button.setEnabled(False)
         self.review_labels_button = QPushButton('Review cuts in labeller')
@@ -393,6 +643,7 @@ class MainWindow(QMainWindow):
         self.review_labels_button.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
         row.addWidget(self.process_button)
         row.addWidget(self.keep_watching)
+        row.addWidget(HelpButton('keep_watching'))
         row.addWidget(self.stop_button)
         row.addStretch()
         row.addWidget(self.review_labels_button)
@@ -408,14 +659,21 @@ class MainWindow(QMainWindow):
         self.queue_bar.setValue(0)
         self.queue_bar.setFormat('Waiting for videos')
         self.outer.addWidget(self.queue_bar)
-        self.video_label = QLabel('Current video')
-        self.video_label.setWordWrap(True)
-        self.outer.addWidget(self.video_label)
-        self.video_bar = QProgressBar()
-        self.video_bar.setRange(0, 100)
-        self.video_bar.setValue(0)
-        self.video_bar.setFormat('No video processing')
-        self.outer.addWidget(self.video_bar)
+        # One name and bar for each video that can run side by side; only the first shows until more are running.
+        self.video_labels, self.video_bars = [], []
+        for slot in range(MAX_PARALLEL_VIDEOS):
+            label = QLabel('Current video')
+            label.setWordWrap(True)
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setFormat('No video processing')
+            for widget in (label, bar):
+                self.outer.addWidget(widget)
+                widget.setVisible(slot == 0)
+            self.video_labels.append(label)
+            self.video_bars.append(bar)
+        self.video_label, self.video_bar = self.video_labels[0], self.video_bars[0]
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(4000)
@@ -457,6 +715,11 @@ class MainWindow(QMainWindow):
     def processor(self):
         return self.session.processor if self.session else None
 
+    @property
+    def worker(self):
+        """A video in progress, or None when nothing is running."""
+        return next(iter(self.workers.values()), None)
+
     def refresh_health(self, cuda=None):
         """Ask what this install has, then show it. The GPU answer costs an import, so it arrives separately."""
         settings = self.settings if not self.isVisible() else self.read_settings()
@@ -491,7 +754,7 @@ class MainWindow(QMainWindow):
 
     def update_process_button(self):
         stoppers = blocking(self.health_checks)
-        running = self.active or bool(self.worker)
+        running = self.active or bool(self.workers)
         self.process_button.setEnabled(not stoppers and not running)
         if stoppers:
             first = stoppers[0]
@@ -581,7 +844,7 @@ class MainWindow(QMainWindow):
 
     def toggle_advanced(self, shown):
         """The whole advanced box folds away when it is in the road; each section folds on its own."""
-        self.advanced.setVisible(shown)
+        self.advanced.setVisible(shown and self.mode != 'basic')
         self.advanced_toggle.setText('Hide advanced settings' if shown else 'Advanced settings')
 
     def sections_changed(self):
@@ -650,20 +913,24 @@ class MainWindow(QMainWindow):
         if not self.review_tab.show_video(source):
             self.show_warning('That video is not in the review yet. Process it first.')
 
-    def process_again(self, source_key):
-        """Forget this video's completion so the next processing run (or the running one) handles it again."""
+    def process_again(self, source_keys):
+        """Forget these videos' completion so the next processing run (or the running one) handles them again."""
+        keys = [source_keys] if isinstance(source_keys, str) else list(source_keys)
+        many = f'{len(keys)} videos' if len(keys) > 1 else 'It'
         if self.active:
-            self.session.forget(source_key)
-            self.append_log('Queued again; it will be processed after the videos already waiting.')
+            for source_key in keys:
+                self.session.forget(source_key)
+            self.append_log(f'{many} queued again, after the videos already waiting.')
         else:
             state, _entries = self.current_entries()
             if state is None:
                 return
             with RunLock(state, 'monitor.lock'):
                 ledger = load_ledger(state / 'ledger.json')
-                ledger['entries'].pop(source_key, None)
+                for source_key in keys:
+                    ledger['entries'].pop(source_key, None)
                 save_ledger(state / 'ledger.json', ledger)
-            self.status.setText('It will be processed the next time you click Process videos.')
+            self.status.setText(f'{many} will be processed the next time you click Process videos.')
         self.refresh_results()
 
     def recut_now(self, source):
@@ -695,16 +962,26 @@ class MainWindow(QMainWindow):
         cut = self.output_mode.currentData()
         if cut and self.csv_in_clips.isChecked():
             folders['csv_folder'] = str(Path(folders['output_folder']) / 'timelines') if folders['output_folder'] else ''
-        return replace(self.settings, **folders,
+        chosen = replace(self.settings, **folders, mode=self.mode, advanced_enabled=tuple(self.advanced_names),
             phases_enabled=self.phase_toggle.isChecked(), people_enabled=self.people_toggle.isChecked(),
             cut_enabled=cut, phase_classifier=self.classifier.currentData(),
             output_layout=self.output_layout.currentData(), device=self.device.currentData(),
             view_mode=self.view_mode.currentData(),
             batch_size=self.batch_size.value(), keep_watching=self.keep_watching.isChecked(),
+            hardware_decode=self.hardware_decode.currentData(), parallel_videos=self.parallel.currentData(),
             recut_on_review=self.recut.isChecked(),
             sample_fps=self.sample_rate.value(), detection_confidence=self.confidence.value(),
+            yolo_model=self.detector.currentData() or self.settings.yolo_model,
             window_geometry=geometry, column_state=columns, open_sections=sections,
             profiles=tuple(self.profiles))
+        if self.mode != 'basic':
+            return chosen
+        # Basic mode has no output choices: a folder per choice, clips named after the video, timelines beside them.
+        wants_people = any(p.enabled and (p.min_person_count or p.min_total_area_percent) for p in self.profiles)
+        clips = folders['output_folder']
+        return replace(chosen, output_layout='by_profile', phases_enabled=True, cut_enabled=True,
+                       people_enabled=wants_people and self.people_available,
+                       csv_folder=str(Path(clips) / 'timelines') if clips else '')
 
     def update_output_mode(self):
         cutting = self.output_mode.currentData()
@@ -718,19 +995,16 @@ class MainWindow(QMainWindow):
         self.folder_edits['csv_folder'].setEnabled(elsewhere)
         self.folder_buttons['csv_folder'].setEnabled(elsewhere)
         self.folder_edits['csv_folder'].setPlaceholderText(
-            'Choose the folder for timeline CSVs' if cutting else 'Required in CSV-only mode')
+            'Choose the folder for timelines' if cutting else 'Needed when only timelines are produced')
         example = ('Example: ' + layout_example(self.output_layout.currentData()) if cutting
-                   else 'Timeline CSVs only; each name includes a unique video ID.')
+                   else 'Timelines only; each name includes a short code for its video.')
         # One line always: a long example is shortened in the middle, with the whole path on hover.
         self.layout_note.setText(self.layout_note.fontMetrics().elidedText(
             example, Qt.TextElideMode.ElideMiddle, self.advanced.maximumWidth() - 40))
         self.layout_note.setToolTip(example)
-        self.output_layout.setToolTip('Output names include a unique video ID, so repeated camera file names are safe. '
-                                      'Your original files are never renamed.')
         self.output_note.setText(
             'Clips start at the nearest keyframe, so they can include a second or two extra.' if cutting else
-            'No clips are made or changed; profiles still mark matching moments in the CSV.')
-        self.output_mode.setToolTip(self.output_note.text())
+            'No clips are made or changed; profiles still mark matching moments in the timeline.')
 
     def check_gpu(self):
         """Importing torch takes a moment, so the window is already up when the answer lands."""
@@ -742,13 +1016,16 @@ class MainWindow(QMainWindow):
         self.classifier.setEnabled(phases)
         self.sample_rate.setEnabled(people)
         self.confidence.setEnabled(people)
+        self.detector.setEnabled(people)
         notes = []
         if not phases:
-            notes.append('Phase identification is off (Advanced settings): phase filters are ignored.')
+            notes.append('Working out the parts of each jump is off (Advanced settings), so profiles cannot choose '
+                         'parts of the jump.')
         if not phases and not people:
-            notes.append('Both classifiers are off: every sample matches each enabled profile.')
+            notes.append('Looking for people is off too: every moment matches each profile in use.')
         self.gate_note.setText(' '.join(notes))
         self.gate_note.setVisible(bool(notes))
+        self.update_keeping()
         if self.health_checks:
             self.refresh_health()
 
@@ -760,18 +1037,44 @@ class MainWindow(QMainWindow):
         for i, p in enumerate(self.profiles):
             values = ['', p.name, ', '.join(phase.replace('_', ' ') for phase in sorted(p.phases)), str(p.min_person_count),
                       f'{p.min_total_area_percent:g}%', f'{p.margin_before_seconds:g}s / {p.margin_after_seconds:g}s']
+            values[0] = 'In use' if p.enabled else 'Off'
             for j, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if j == 0:
                     item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                     item.setCheckState(Qt.Checked if p.enabled else Qt.Unchecked)
+                # A profile in use stands out in green; one that is off fades back.
+                if p.enabled:
+                    item.setBackground(QColor(GOOD_BACKGROUND))
+                    item.setForeground(QColor('#ffffff'))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                else:
+                    item.setForeground(QColor(MUTED))
+                item.setToolTip(help_text.profile_summary(p))   # the whole of it, whatever the columns cut short
                 self.table.setItem(i, j, item)
         self.table.blockSignals(False)
+        self.update_keeping()
+
+    def update_keeping(self):
+        """Say, in a sentence per profile in use, what a run will keep."""
+        if not hasattr(self, 'keeping') or not hasattr(self, 'phase_toggle'):
+            return
+        phases, people = self.phase_toggle.isChecked(), self.people_toggle.isChecked()
+        used = [p for p in self.profiles if p.enabled]
+        self.keeping.setObjectName('keeping' if used else 'keepingNothing')
+        self.keeping.style().unpolish(self.keeping)
+        self.keeping.style().polish(self.keeping)
+        self.keeping.setText('\n'.join(['A run will keep:'] + [
+            f'  {p.name}: {help_text.profile_summary(p, phases, people)}' for p in used]) if used else
+            'Nothing is in use, so a run would keep nothing. Tick "In use" on at least one profile.')
 
     def profile_checked(self, item):
         if item.column() == 0:
             i = item.row()
             self.profiles[i] = replace(self.profiles[i], enabled=item.checkState() == Qt.Checked)
+            QTimer.singleShot(0, self.refresh_profiles)   # redraw the row in its new colours, once this click is done
 
     def show_editor(self, profile, index=None):
         dialog = ProfileEditor(profile, self.phase_toggle.isChecked(), self.people_toggle.isChecked(), self)
@@ -825,9 +1128,16 @@ class MainWindow(QMainWindow):
 
     def append_log(self, message):
         self.log.appendPlainText(f'[{datetime.now():%H:%M:%S}] {message}')
-        if self.worker:
+        if len(self.workers) == 1:
             label = source_label(self.worker.source, self.settings.input_folder)
             self.status.setText(f'Queue: {len(self.queue)}   Current: {label} — {message[:150]}')
+        elif self.workers:
+            self.status.setText(f'Queue: {len(self.queue)}   Processing {len(self.workers)} videos at once')
+
+    def worker_log(self, slot, message):
+        """A line from one of the videos in progress, named when there is more than one."""
+        worker = self.workers.get(slot)
+        self.append_log(f'{worker.source.name}: {message}' if worker and len(self.workers) > 1 else message)
 
     def show_warning(self, message):
         self.warning.setText(message)
@@ -840,29 +1150,39 @@ class MainWindow(QMainWindow):
         self.queue_bar.setFormat(label + (f' · {estimate}' if estimate else ''))
 
     def estimate_text(self):
-        if not self.active or (not self.worker and not self.queue):
+        if not self.active or (not self.workers and not self.queue):
             return ''
         if self.prober is None:
             return ''
         queued = [self.prober.get(key(p)) for p, _ in self.queue]
-        current = self.prober.get(key(self.worker.source)) if self.worker else None
-        elapsed = time.monotonic() - self.video_started if self.worker and self.video_started else 0.0
-        return describe(self.speed.remaining_seconds(queued, current, elapsed))
+        now = time.monotonic()
+        running = [(self.prober.get(key(w.source)), now - w.started_at) for w in self.workers.values()]
+        return describe(self.speed.remaining_seconds(queued, running=running, side_by_side=len(self.workers)))
 
-    def update_video_progress(self, stage, done, total):
+    def update_video_progress(self, slot, stage, done, total):
         value, label = video_progress(stage, done, total, self.settings)
-        self.video_bar.setRange(0, 0 if value is None else 100)
+        bar = self.video_bars[slot]
+        bar.setRange(0, 0 if value is None else 100)
         if value is not None:
-            self.video_bar.setValue(value)
-        self.video_bar.setFormat(label + (' · %p%' if value is not None else ''))
-        if self.worker:
-            name = source_label(self.worker.source, self.settings.input_folder)
-            self.video_label.setText(f'{name} — {label}')
+            bar.setValue(value)
+        bar.setFormat(label + (' · %p%' if value is not None else ''))
+        if slot in self.workers:
+            name = source_label(self.workers[slot].source, self.settings.input_folder)
+            self.video_labels[slot].setText(f'{name} — {label}')
+
+    def show_video_rows(self):
+        """The first row always; another for each further video in progress."""
+        for slot in range(1, MAX_PARALLEL_VIDEOS):
+            for widget in (self.video_labels[slot], self.video_bars[slot]):
+                widget.setVisible(slot in self.workers)
 
     def start_session(self, existing_only, only=None):
         """``only``: process just these files now (re-cut after a review), then stop."""
         try:
             settings = self.read_settings()
+            if self.mode == 'basic' and not any(p.enabled for p in settings.profiles):
+                self.show_warning('Tick at least one of Trim my footage, A grade or B grade.')
+                return
             # Check again here, whatever started this: the GPU answer may not have landed yet, the device may have
             # changed since, and a re-cut from the Review tab never passes the Process button.
             if self.cuda is None:
@@ -874,6 +1194,8 @@ class MainWindow(QMainWindow):
                 self.show_warning(f'Not started. {stoppers[0].label}: {stoppers[0].detail}')
                 return
             self.session = ProcessingSession(settings, existing_only, only, processor_factory=VideoProcessor)
+            from app.load import Pacer
+            self.pacer = Pacer(graphics_wanted=settings.device != 'cpu') if settings.parallel_videos == 0 else None
             self.unreadable_reported = False
             save_settings(settings)
             self.settings = settings
@@ -901,7 +1223,7 @@ class MainWindow(QMainWindow):
         if not self.active:
             return
         try:
-            ready = self.session.scan(busy=self.worker.source if self.worker else None)
+            ready = self.session.scan(busy=[worker.source for worker in self.workers.values()])
             self.report_unreadable()
             for source, _signature in ready:
                 if self.prober is None:
@@ -910,9 +1232,9 @@ class MainWindow(QMainWindow):
             self.queue_progress.enqueue(len(ready))
             self.update_queue_progress()
             self.start_next()
-            if not self.worker and self.session.finished():
+            if not self.workers and self.session.finished():
                 self.finish_session()
-            if not self.worker and self.active:
+            if not self.workers and self.active:
                 self.status.setText(f'Queue: {len(self.queue)}   Watching — {len(self.session.snapshot)} source files')
         except Exception as exc:
             self.show_warning(str(exc))
@@ -930,22 +1252,38 @@ class MainWindow(QMainWindow):
         more = f' ({len(problems) - 1} more in the log.)' if len(problems) > 1 else ''
         self.show_warning(f'Some footage cannot be read, so it is left out. {where}: {reason}.{more}')
 
-    def start_next(self):
-        if self.worker or not self.active or not self.queue:
-            return
-        source, signature, previous, moved = self.session.next_job()
-        self.worker = VideoWorker(self.processor, source, signature, previous, self, moved_from=moved)
-        self.worker.log.connect(self.append_log)
-        self.worker.progress.connect(self.update_video_progress)
-        self.worker.outcome.connect(self.job_outcome)
-        self.worker.finished.connect(self.job_finished)
-        self.video_label.setText(f'{source.name} — {source.parent}')
-        self.update_video_progress('identify', 0, 0)
-        self.video_started = time.monotonic()
-        self.worker.start()
+    def room_for_another(self):
+        """True when one more video may start: under the number chosen, or, on Automatic, when the machine has room."""
+        running = len(self.workers)
+        if self.settings.parallel_videos:
+            return running < self.settings.parallel_videos
+        if running >= MAX_PARALLEL_VIDEOS:
+            return False
+        return running == 0 or (self.pacer is not None and self.pacer.may_start(running))
 
-    def job_outcome(self, status, result):
-        source, signature = self.worker.source, self.worker.signature
+    def start_next(self):
+        while self.active and self.queue and self.room_for_another():
+            slot = next(s for s in range(MAX_PARALLEL_VIDEOS) if s not in self.workers)
+            source, signature, previous, moved = self.session.next_job()
+            if self.pacer and self.workers:
+                self.append_log(f'Starting another video alongside: {self.pacer.reason}.')
+            worker = VideoWorker(self.session.processor_for(slot), source, signature, previous, self,
+                                 moved_from=moved, slot=slot)
+            self.workers[slot] = worker
+            worker.log.connect(self.worker_log)
+            worker.progress.connect(self.update_video_progress)
+            worker.outcome.connect(self.job_outcome)
+            worker.finished.connect(self.job_finished)
+            self.show_video_rows()
+            self.video_labels[slot].setText(f'{source.name} — {source.parent}')
+            self.update_video_progress(slot, 'identify', 0, 0)
+            if self.pacer:
+                self.pacer.started()
+            worker.start()
+
+    def job_outcome(self, slot, status, result):
+        worker = self.workers[slot]
+        source, signature = worker.source, worker.signature
         name = source_label(source, self.settings.input_folder)
         self.append_log(f'{name}: {status}' + (f' — {result["error"]}' if 'error' in result else ''))
         if status == 'failed':
@@ -956,8 +1294,8 @@ class MainWindow(QMainWindow):
             self.show_warning(f'Could not save completion ledger: {exc}')
             status = 'failed'
             self.stop_enqueuing()
-        if status == 'success' and result.get('ran_model') and self.video_started:
-            self.speed.update(time.monotonic() - self.video_started, result.get('duration_sec'))
+        if status == 'success' and result.get('ran_model'):
+            self.speed.update(time.monotonic() - worker.started_at, result.get('duration_sec'))
         self.queue_progress.settle(status)
         self.update_queue_progress()
         self.refresh_results()
@@ -965,18 +1303,21 @@ class MainWindow(QMainWindow):
             self.review_tab.mark_stale()
             if self.tabs.currentIndex() == 1:
                 self.review_tab.refresh(self.settings)
-            self.update_video_progress('complete', 1, 1)
+            self.update_video_progress(slot, 'complete', 1, 1)
         else:
-            self.video_bar.setRange(0, 100)
-            self.video_bar.setValue(0)
-            self.video_bar.setFormat(status.capitalize())
-            self.video_label.setText(f'{name} — {status}')
+            self.video_bars[slot].setRange(0, 100)
+            self.video_bars[slot].setValue(0)
+            self.video_bars[slot].setFormat(status.capitalize())
+            self.video_labels[slot].setText(f'{name} — {status}')
 
     def job_finished(self):
-        self.worker.deleteLater()
-        self.worker = None
+        worker = self.sender()
+        self.workers.pop(worker.slot, None)
+        worker.deleteLater()
+        self.show_video_rows()
         if self.stopping:
-            self.finish_session()
+            if not self.workers:
+                self.finish_session()
         else:
             self.start_next()
             if self.session and self.session.existing_only:
@@ -988,21 +1329,27 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         self.queue_progress.deferred += self.session.drain() if self.session else 0
         self.update_queue_progress()
-        if self.worker:
-            self.stop_button.setText('Cancel current video…')
-            self.status.setText('Stopping — finishing the current video. Press again to cancel it.')
+        if self.workers:
+            several = len(self.workers) > 1
+            self.stop_button.setText('Cancel videos in progress…' if several else 'Cancel current video…')
+            self.status.setText(f'Stopping — finishing the {len(self.workers)} videos in progress. Press again to '
+                                'cancel them.' if several else
+                                'Stopping — finishing the current video. Press again to cancel it.')
         else:
             self.finish_session()
 
     def stop_session(self):
         if not self.stopping:
             self.stop_enqueuing()
-        elif self.worker:
-            answer = QMessageBox.question(self, 'Cancel current video?',
-                'Cancel processing the current video? Completed CSV files and clips will be kept. '
-                'You can process this video again later.')
+        elif self.workers:
+            several = len(self.workers) > 1
+            answer = QMessageBox.question(self, 'Cancel videos in progress?' if several else 'Cancel current video?',
+                ('Cancel the videos being processed now? ' if several else 'Cancel processing the current video? ')
+                + 'Completed timelines and clips will be kept. You can process '
+                + ('them' if several else 'this video') + ' again later.')
             if answer == QMessageBox.Yes:
-                self.processor.runner.cancelled.set()
+                for worker in self.workers.values():
+                    worker.processor.runner.cancelled.set()
                 self.stop_button.setEnabled(False)
 
     def finish_session(self):
@@ -1019,9 +1366,9 @@ class MainWindow(QMainWindow):
         self.refresh_health()  # a run can end because something went missing
 
     def closeEvent(self, event):
-        if self.worker:
+        if self.workers:
             self.stop_enqueuing()
-            self.show_warning('Finishing the current video. Use Cancel current video to stop it, then close the window.')
+            self.show_warning('Finishing the video in progress. Press Stop again to cancel it, then close the window.')
             event.ignore()
             return
         self.finish_session()

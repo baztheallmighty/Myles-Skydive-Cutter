@@ -1,44 +1,55 @@
-"""Resident YOLO model with samples on the shared timeline grid."""
+"""Resident YOLO model with samples on the shared timeline grid, taken from one read of the source.
+
+The frames come from ffmpeg, already shrunk, at the grid's own times. When the phase model's proxy is wanted too, the
+same decode writes it, so a video's picture is read once however many things look at it.
+"""
+import os
 import subprocess
+import threading
+from pathlib import Path
 
 from app.timeline import canonical_grid
 
-PEOPLE_SIZE = 640  # what the detector sees; the phase model uses the same view at 160
+NOBODY = {'person_count': 0, 'largest_person_area_percent': 0.0, 'total_person_area_percent': 0.0}
 
 
 def views_for(mode, media):
     """Which sides of the camera to count people on. Only 360 footage has a back."""
-    from cutter_v4.engine import has_back_view
+    from cutter_v4.media import has_back_view
     if not media or not has_back_view(media):
         return ['front']
     return {'front': ['front'], 'back': ['back'], 'front_back': ['front', 'back']}.get(mode, ['front'])
 
 
-def view_frames(source, media, view, settings, ffmpeg):
-    """Frames on the sample grid, through the same window the phase model looks through."""
+def read_frames(command, width, height):
+    """Frames from an ffmpeg command that writes raw BGR to standard output. Raises if ffmpeg reports failure.
+
+    Stopping early (a cancelled run) stops ffmpeg too.
+    """
     import numpy as np
-    from cutter_v4.engine import video_map, view_filter
-    view_chain = view_filter(media['kind'], media['width'], media['height'], view, fps=settings.sample_fps,
-                             size=PEOPLE_SIZE,
-                             dual_fisheye=bool(media.get('dual_fisheye'))).replace('format=rgb24', 'format=bgr24')
-    command = [ffmpeg, '-hide_banner', '-nostdin', '-loglevel', 'error', '-i', str(source),
-               '-map', video_map(media, view), '-an', '-sn', '-dn', '-vf', view_chain,
-               '-f', 'rawvideo', '-pix_fmt', 'bgr24', 'pipe:1']
-    frame_bytes = PEOPLE_SIZE * PEOPLE_SIZE * 3
     process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    complaints = []
+    listener = threading.Thread(target=lambda: complaints.append(process.stderr.read()), daemon=True)
+    listener.start()
+    frame_bytes, finished = width * height * 3, False
     try:
         while True:
             buffer = process.stdout.read(frame_bytes)
             if len(buffer) < frame_bytes:
                 break
-            yield np.frombuffer(buffer, dtype=np.uint8).reshape(PEOPLE_SIZE, PEOPLE_SIZE, 3)
+            yield np.frombuffer(buffer, dtype=np.uint8).reshape(height, width, 3)
+        finished = True
     finally:
+        if not finished:
+            process.kill()
         process.stdout.close()
-        error = process.stderr.read().decode('utf-8', 'replace')
+        code = process.wait()
+        listener.join(timeout=5)
         process.stderr.close()
-        if process.wait() not in (0, None) and error:
-            raise ValueError(f'Could not read frames for people counting: {error[-300:]}')
+        if finished and code:
+            error = b''.join(complaints).decode('utf-8', 'replace')
+            raise ValueError(f'Could not read this video: {error[-300:]}')
 
 
 def merge_views(per_view):
@@ -69,93 +80,91 @@ class PeopleSampler:
     def __init__(self):
         self.model = None
 
-    def sample(self, source, duration, settings, runner, media=None):
-        """Count people in each view this run asks for, on the shared one-second grid."""
-        views = views_for(settings.view_mode, media)
-        if views == ['front'] and (not media or media['kind'] == 'flat'):
-            return self.sample_view(source, duration, settings, runner)   # an ordinary video is read directly
+    def sample(self, source, duration, settings, runner, media=None, proxy=None):
+        """Count people in each view this run asks for, on the shared grid.
+
+        ``proxy``: also write the phase model's proxy there, from the same read of the source.
+        """
         from app.ffmpeg_tools import find_executable
+        from cutter_v4.media import hardware_decode, probe, refine_360_kind, resolve_view
         ffmpeg = find_executable('ffmpeg')
+        if media is None:
+            media = probe(Path(source), find_executable('ffprobe'))
+        views = views_for(settings.view_mode, media)
+        if 'back' in views:
+            media = refine_360_kind(Path(source), ffmpeg, media)
+        # The phases are read through the first view counted, so its read can carry the proxy.
+        media, first = resolve_view(Path(source), ffmpeg, media, views[0])
         per_view = {}
         for view in views:
-            runner.log(f'People: counting in the {view} view')
-            per_view[view] = self.sample_view(source, duration, settings, runner, media=media,
-                                              ffmpeg=ffmpeg, view=view)
+            if len(views) > 1:
+                runner.log(f'People: counting in the {view} view')
+            hardware = hardware_decode(ffmpeg, source, media, view, settings.hardware_decode)
+            per_view[view] = self.sample_view(source, duration, settings, runner, media, ffmpeg, view,
+                                              proxy=proxy if view == first else None, hardware=hardware)
         return merge_views(per_view) if len(per_view) > 1 else next(iter(per_view.values()))
 
-    @staticmethod
-    def read_sample(capture, cv2, seconds, step_back):
-        """The frame at ``seconds``, or None. Retried one frame earlier, for a sample past the last frame."""
-        for moment in (seconds, seconds - step_back):
-            if moment < 0:
-                break
-            capture.set(cv2.CAP_PROP_POS_MSEC, moment * 1000)
-            ok, frame = capture.read()
-            if ok:
-                return frame
-        return None
-
-    def sample_view(self, source, duration, settings, runner, media=None, ffmpeg=None, view='front'):
-        import cv2
-        from app.detection import detect_people, find_person_class_ids, load_yolo_model
-        if self.model is None:
-            from pathlib import Path
-            try:
-                # Ultralytics sends anonymous usage statistics by default; this app promises to stay offline.
-                from ultralytics import settings as ultralytics_settings
-                ultralytics_settings.update({'sync': False})
-            except Exception:  # noqa: BLE001 - an older or missing Ultralytics simply has nothing to switch off
-                pass
-            if not Path(settings.yolo_model).is_file():
-                raise FileNotFoundError(f'Local YOLO model is missing: {settings.yolo_model}')
-            runner.log('Loading person detector…')
-            self.model = load_yolo_model(settings.yolo_model)
-            if settings.device != 'auto':
-                self.model.to(settings.device)
-            self.person_ids = find_person_class_ids(self.model)
-            if not self.person_ids:
-                raise ValueError('The selected YOLO model has no person class.')
-        rows = []
-        grid = canonical_grid(duration, settings.sample_fps)
-        if ffmpeg:   # 360 footage: the detector looks through the same window as the phase model
-            frames = view_frames(source, media, view, settings, ffmpeg)
-            for index, t in enumerate(grid):
-                runner.check_cancelled()
-                frame = next(frames, None)
-                if frame is None:
-                    break
-                boxes = detect_people(self.model, frame, settings.detection_confidence, self.person_ids)
-                rows.append({'time_sec': t, **detection_metrics(boxes)})
-                runner.report_progress('people', index + 1, len(grid))
-                if index % 10 == 0 or index + 1 == len(grid):
-                    runner.log(f'People {index + 1}/{len(grid)} ({100 * (index + 1) / len(grid):.0f}%)')
-            while len(rows) < len(grid):   # a short read leaves the tail uncounted rather than failing the video
-                rows.append({'time_sec': grid[len(rows)], 'person_count': 0, 'largest_person_area_percent': 0.0,
-                             'total_person_area_percent': 0.0})
-            return rows
-        capture = cv2.VideoCapture(str(source))
+    def load(self, settings, runner):
+        from app.detection import find_person_class_ids, load_yolo_model
+        if self.model is not None:
+            return
         try:
-            if not capture.isOpened():
-                raise ValueError(f'Cannot open video: {source}')
-            rate = capture.get(cv2.CAP_PROP_FPS)
-            step_back = 1.0 / rate if rate and rate > 0 else 1.0 / 30
-            for index, t in enumerate(grid):
-                runner.check_cancelled()
-                frame = self.read_sample(capture, cv2, t, step_back)
-                if frame is None:
-                    # The last sample can sit between the final frame and the end of the video: a 257.507 s recording
-                    # is sampled at 257.5, which is inside it but past every frame. That is not a damaged file.
-                    if index == len(grid) - 1:
-                        rows.append({'time_sec': t, 'person_count': 0, 'largest_person_area_percent': 0.0,
-                                     'total_person_area_percent': 0.0})
-                        runner.report_progress('people', index + 1, len(grid))
-                        continue
-                    raise ValueError(f'Cannot decode person sample at {t:.3f}s in {source.name}.')
-                boxes = detect_people(self.model, frame, settings.detection_confidence, self.person_ids)
-                rows.append({'time_sec': t, **detection_metrics(boxes)})
-                runner.report_progress('people', index + 1, len(grid))
-                if index % 10 == 0 or index + 1 == len(grid):
-                    runner.log(f'People {index + 1}/{len(grid)} ({100 * (index + 1) / len(grid):.0f}%)')
-        finally:
-            capture.release()
+            # Ultralytics sends anonymous usage statistics by default; this app promises to stay offline.
+            from ultralytics import settings as ultralytics_settings
+            ultralytics_settings.update({'sync': False})
+        except Exception:  # noqa: BLE001 - an older or missing Ultralytics simply has nothing to switch off
+            pass
+        if not Path(settings.yolo_model).is_file():
+            raise FileNotFoundError(f'Local YOLO model is missing: {settings.yolo_model}')
+        runner.log('Loading person detector…')
+        self.model = load_yolo_model(settings.yolo_model)
+        if settings.device != 'auto':
+            self.model.to(settings.device)
+        self.person_ids = find_person_class_ids(self.model)
+        if not self.person_ids:
+            raise ValueError('The selected YOLO model has no person class.')
+
+    def sample_view(self, source, duration, settings, runner, media, ffmpeg, view='front', proxy=None, hardware=()):
+        from app.detection import detect_people
+        from cutter_v4.media import people_frame_size, read_command
+        self.load(settings, runner)
+        grid = canonical_grid(duration, settings.sample_fps)
+        width, height = people_frame_size(media)
+        temporary = Path(proxy).with_suffix('.tmp.mp4') if proxy else None
+        # A hardware decode that fails part-way is done again on the processor.
+        attempts = [hardware, ()] if hardware else [()]
+        for number, attempt in enumerate(attempts, 1):
+            rows = []
+            command = read_command(ffmpeg, source, media, view, proxy=temporary, people_fps=settings.sample_fps,
+                                   hardware=attempt)
+            try:
+                for index, frame in enumerate(read_frames(command, width, height)):
+                    runner.check_cancelled()
+                    if index >= len(grid):
+                        continue   # ffmpeg may round one frame past the end; the proxy still has to finish
+                    boxes = detect_people(self.model, frame, settings.detection_confidence, self.person_ids)
+                    rows.append({'time_sec': grid[index], **detection_metrics(boxes)})
+                    runner.report_progress('people', index + 1, len(grid))
+                    if index % 10 == 0 or index + 1 == len(grid):
+                        runner.log(f'People {index + 1}/{len(grid)} ({100 * (index + 1) / len(grid):.0f}%)')
+                break
+            except BaseException as exc:   # a cancelled run included: never leave half a proxy behind
+                if temporary:
+                    temporary.unlink(missing_ok=True)
+                if not isinstance(exc, ValueError) or number == len(attempts):
+                    raise
+                runner.log('The graphics card could not decode this video; reading it on the processor instead.')
+        if grid and not rows:
+            if temporary:
+                temporary.unlink(missing_ok=True)
+            raise ValueError(f'Could not read any picture from {Path(source).name}.')
+        if temporary:
+            os.replace(temporary, proxy)
+        # The last sample can sit between the final frame and the end of the video: a 257.507 s recording is sampled
+        # at 257.5, which is inside it but past every frame. It is counted from the frame before it. Anything more
+        # than that missing is a short read, left uncounted rather than failing the video.
+        if len(rows) == len(grid) - 1:
+            rows.append({**rows[-1], 'time_sec': grid[-1]})
+        while len(rows) < len(grid):
+            rows.append({'time_sec': grid[len(rows)], **NOBODY})
         return rows

@@ -19,8 +19,8 @@ import sys
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QToolButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QToolButton,
+                               QToolTip, QVBoxLayout, QWidget)
 
 from cutter_v4 import ROOT
 
@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / 'v3_poc'))
 import review as base  # noqa: E402  v3_poc/review.py
 from common import FIELDS, annotation_fingerprint, read_csv, write_json  # noqa: E402
 
-from cutter_v4.review import checks_from  # noqa: E402,F401  (also used by the tests)
+from cutter_v4.review import REASONS, checks_from  # noqa: E402,F401  (also used by the tests)
 
 labeler = base.labeler
 
@@ -38,6 +38,37 @@ LEFT = LABEL_COLUMN + MARGIN                # x where time 0 (or the view start)
 RIGHT = MARGIN
 AGREEMENT_COLORS = {'agree': '#2e7d4f', 'disagree': '#e0a21b', 'unknown': '#3a4454'}
 CLIP_COLOR, CLIP_HOVER = '#3b82c4', '#6fb0ea'
+# People: how many were found and how much of the picture they fill are two tests, shown as two rows, with a third
+# that says which test (or which other rule) kept a moment out of the clips.
+PEOPLE_ROWS = ('people', 'filled', 'why')
+PASSES, FALLS_SHORT = '#3fae6a', '#d39a2c'
+LEGEND_HEIGHT = 20
+KEPT = ('kept', 'extra', 'joined')   # the reasons that mean a moment is in the clips
+REASON_COLORS = {'kept': '#2e7d4f', 'extra': '#3f6f58', 'joined': '#2f7f86', 'phase': '#394455', 'nobody': '#9a4444',
+                 'few': '#c2703a', 'small': '#b8922a', 'short': '#6b5fa8'}
+
+
+def runs(values):
+    """(value, first index, last index) for each stretch of equal neighbours."""
+    out = []
+    for index, value in enumerate(values):
+        if out and out[-1][0] == value:
+            out[-1] = (value, out[-1][1], index)
+        else:
+            out.append((value, index, index))
+    return out
+
+
+def verdict(code, count, area, profile):
+    """Why this moment is or is not in the profile's clips, with the numbers that decided it."""
+    return {'kept': 'it meets this profile',
+            'extra': 'extra footage beside a match',
+            'joined': 'a gap joined because people were still in view',
+            'phase': 'this part of the jump is not in the profile',
+            'nobody': 'nobody was found',
+            'few': f"{count} found, needs {profile['min_count']}",
+            'small': f"people fill {area:.0f}% of the picture, needs {profile['min_area']:g}%",
+            'short': 'the match was too short to keep'}[code]
 MIN_VIEW_SECONDS = 5.0
 
 
@@ -206,8 +237,9 @@ class PredictionTracks(QWidget):
     seek = Signal(float)
     play_clip = Signal(object)
     ROWS = [('final', 'Final (cut)'), ('v4', 'V4 video'), ('audio', 'Audio'), ('motion', 'Motion model'),
-            ('trace', 'Motion (g)'), ('people', 'People in view'), ('agreement', 'Agreement'), ('clips', 'Clips cut')]
-    COLLAPSED = ['final', 'clips']
+            ('trace', 'Motion (g)'), ('people', 'People found'), ('filled', 'Picture filled'),
+            ('why', 'Why not kept'), ('agreement', 'Agreement'), ('clips', 'Clips cut')]
+    COLLAPSED = ['final', 'people', 'filled', 'why', 'clips']
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -216,15 +248,79 @@ class PredictionTracks(QWidget):
         self.expanded = True
         self.view = getattr(parent, 'view', None) or View()
         self.hover_clip = None
+        self.hover_x = None       # where the mouse is, for the line drawn through every row
+        self.hover_text = ''      # what the readout beside the mouse last said
+        self.profile_index = 0    # which profile in use the people rows are judged against
         self.setMouseTracking(True)
         self._resize()
+
+    # --- people: the count, the share of the picture, and the verdict, as separate things ---------------------
+    def people(self):
+        return (self.result or {}).get('people') or {}
+
+    def judged(self):
+        """The profile the people rows are judged against, or None when no profile is in use."""
+        profiles = self.people().get('profiles') or []
+        return profiles[min(self.profile_index, len(profiles) - 1)] if profiles else None
+
+    def sample_at(self, seconds):
+        times = self.people().get('t') or []
+        return min(range(len(times)), key=lambda i: abs(times[i] - seconds)) if times else None
+
+    def people_at(self, seconds):
+        """(count, share of the picture, reason code or None, profile or None) for the sample nearest ``seconds``."""
+        index = self.sample_at(seconds)
+        if index is None:
+            return None
+        people, profile = self.people(), self.judged()
+        return people['count'][index], people['area'][index], profile['reason'][index] if profile else None, profile
+
+    def people_lines(self, seconds):
+        """The count, the share of the picture and the verdict, one line each."""
+        found = self.people_at(seconds)
+        if found is None:
+            return []
+        count, area, code, profile = found
+        lines = [f"{count} {'person' if count == 1 else 'people'} found"
+                 + (f" (needs {profile['min_count']})" if profile and profile['min_count'] else ''),
+                 f"{area:.0f}% of the picture filled"
+                 + (f" (needs {profile['min_area']:g}%)" if profile and profile['min_area'] else '')]
+        if code:
+            lines.append(('Kept: ' if code in KEPT else 'Not kept: ') + verdict(code, count, area, profile))
+        return lines
+
+    def people_caption(self, seconds):
+        """The same, in one line for the caption on the video."""
+        found = self.people_at(seconds)
+        if found is None:
+            return ''
+        count, area, code, profile = found
+        text = f"{count} {'person' if count == 1 else 'people'} · {area:.0f}% of picture"
+        return text + (f' · not kept: {verdict(code, count, area, profile)}' if code and code not in KEPT else '')
+
+    def readout(self, name, seconds):
+        """What one people row says at this moment: its own number, nothing else."""
+        found = self.people_at(seconds)
+        if found is None:
+            return ''
+        count, area, code, _profile = found
+        return {'people': f"{count} {'person' if count == 1 else 'people'}", 'filled': f'{area:.0f}%',
+                'why': REASONS.get(code, '')}[name]
+
+    def subtitle(self, name):
+        profile = self.judged()
+        if not profile or name == 'why':
+            return ''
+        if name == 'people':
+            return f"needs {profile['min_count']}" if profile['min_count'] else 'no minimum'
+        return f"needs {profile['min_area']:g}%" if profile['min_area'] else 'no minimum'
 
     def rows(self):
         names = [n for n, _t in self.ROWS] if self.expanded else self.COLLAPSED
         return [(n, t) for n, t in self.ROWS if n in names]
 
     def row_height(self, name):
-        return 48 if name in ('trace', 'people') else 22
+        return {'trace': 48, 'people': 44, 'filled': 54, 'why': 24 + LEGEND_HEIGHT}.get(name, 22)
 
     def _resize(self):
         self.setFixedHeight(sum(self.row_height(n) + 4 for n, _t in self.rows()) + 6)
@@ -275,7 +371,16 @@ class PredictionTracks(QWidget):
         for name, title in self.rows():
             height = self.row_height(name)
             painter.setPen(QColor('#edf1f7'))
-            painter.drawText(QRectF(4, top, LABEL_COLUMN - 6, height), Qt.AlignmentFlag.AlignVCenter, title)
+            painter.setFont(QFont('Segoe UI', 10))
+            under = self.subtitle(name) if self.result and name in PEOPLE_ROWS else ''
+            if under:   # the bar this row has to clear, under its name
+                painter.drawText(QRectF(4, top, LABEL_COLUMN - 6, height / 2 + 4), Qt.AlignmentFlag.AlignBottom, title)
+                painter.setPen(QColor('#9aa4b2'))
+                painter.setFont(QFont('Segoe UI', 9))
+                painter.drawText(QRectF(4, top + height / 2 + 4, LABEL_COLUMN - 6, height / 2 - 4),
+                                 Qt.AlignmentFlag.AlignTop, under)
+            else:
+                painter.drawText(QRectF(4, top, LABEL_COLUMN - 6, height), Qt.AlignmentFlag.AlignVCenter, title)
             painter.fillRect(QRectF(LEFT, top, self.track_width(), height), QColor('#202938'))
             if self.result:
                 painter.save()
@@ -284,9 +389,28 @@ class PredictionTracks(QWidget):
                 x = self.x_of(self.position)
                 painter.setPen(QColor('#ffffff'))
                 painter.drawLine(QPointF(x, top), QPointF(x, top + height))
+                if name in PEOPLE_ROWS and (name != 'why' or self.judged()):
+                    self.paint_readout(painter, name, top)
                 painter.restore()
             top += height + 4
+        if self.result and self.hover_x is not None and self.hover_x >= LEFT:
+            painter.setPen(QPen(QColor('#8cc4ea'), 1))
+            painter.drawLine(QPointF(self.hover_x, 3), QPointF(self.hover_x, self.height() - 3))
         painter.end()
+
+    def paint_readout(self, painter, name, top):
+        """This row's value at the playback position, at the right-hand end, readable without hovering."""
+        text = self.readout(name, self.position)
+        if not text:
+            return
+        font = QFont('Segoe UI', 9)
+        font.setBold(True)
+        painter.setFont(font)
+        width = painter.fontMetrics().horizontalAdvance(text) + 12
+        box = QRectF(self.width() - RIGHT - width - 2, top + 2, width, 17)
+        painter.fillRect(box, QColor(17, 23, 34, 225))
+        painter.setPen(QColor('#ffffff'))
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
     def note(self, painter, top, height, text):
         painter.setPen(QColor('#8d97a6'))
@@ -335,37 +459,74 @@ class PredictionTracks(QWidget):
                     painter.setPen(QPen(QColor(color), 2))
                     painter.drawLine(QPointF(x, top), QPointF(x, top + height))
                     painter.drawText(QRectF(x + 3, top, 100, 14), Qt.AlignmentFlag.AlignLeft, label)
-        elif name == 'people':
-            people = result.get('people') or {}
-            if not people.get('t'):
+        elif name in PEOPLE_ROWS:
+            people = self.people()
+            times = people.get('t') or []
+            if not times:
                 self.note(painter, top, height, 'People were not counted for this video')
                 return
-            requirement = people.get('requirement') or {}
-            floor = float(requirement.get('min_area') or 0)
-            high = max(40.0, min(float(people.get('max_area') or 0), 150.0))  # keep the usual range readable
-            y = lambda area: top + height - min(high, max(0.0, area)) / high * height
-            # Seconds that clear the people filter are shaded, so a gap in the clips explains itself.
-            for second, ok in zip(people['t'], people['matched']):
-                if ok:
-                    x = self.x_of(second - .5)
-                    painter.fillRect(QRectF(x, top, max(1., self.x_of(second + .5) - x), height), QColor('#24402f'))
-            if floor:
-                painter.setPen(QPen(QColor('#7f8b9c'), 1, Qt.PenStyle.DashLine))
-                painter.drawLine(QPointF(LEFT, y(floor)), QPointF(self.width() - RIGHT, y(floor)))
-                painter.setPen(QColor('#8d97a6'))
-                painter.setFont(QFont('Segoe UI', 7))
-                painter.drawText(QRectF(self.width() - RIGHT - 122, y(floor) - 11, 120, 10),
-                                 Qt.AlignmentFlag.AlignRight,
-                                 f"needs {requirement.get('min_count', 0):g} person, {floor:g}%")
-            painter.setPen(QPen(QColor('#8ce0b0'), 1.3))
-            points = [QPointF(self.x_of(t), y(area)) for t, area in zip(people['t'], people['area'])]
-            for a, b in zip(points, points[1:]):
-                painter.drawLine(a, b)
-            painter.setFont(QFont('Segoe UI', 8))
-            painter.setPen(QColor('#8d97a6'))
-            painter.drawText(QRectF(LEFT + 6, top + 1, 340, 12), Qt.AlignmentFlag.AlignLeft,
-                             f"up to {people.get('max_count', 0)} in view, {people.get('max_area', 0):.0f}% of frame"
-                             if people.get('counted') else 'nobody was seen in this video')
+            profile = self.judged()
+            step = times[1] - times[0] if len(times) > 1 else 1.0
+            edges = lambda t: (self.x_of(t - step / 2), self.x_of(t + step / 2))
+            if name == 'why':
+                if not profile:
+                    self.note(painter, top, height, 'No profile is in use, so nothing is cut')
+                    return
+                strip = height - LEGEND_HEIGHT
+                for code, first, last in runs(profile['reason']):
+                    x, right = edges(times[first])[0], edges(times[last])[1]
+                    painter.fillRect(QRectF(x, top, max(1., right - x), strip), QColor(REASON_COLORS[code]))
+                    if right - x > 96:
+                        painter.setPen(QColor('#ffffff'))
+                        painter.setFont(QFont('Segoe UI', 9))
+                        painter.drawText(QRectF(max(x, LEFT) + 4, top, right - max(x, LEFT) - 6, strip),
+                                         Qt.AlignmentFlag.AlignVCenter, REASONS[code])
+                # What each colour means, so a stretch too narrow to carry its name can still be read.
+                painter.fillRect(QRectF(LEFT, top + strip, self.track_width(), LEGEND_HEIGHT), QColor('#181e28'))
+                painter.setFont(QFont('Segoe UI', 9))
+                x = LEFT + 2
+                for code, words in REASONS.items():
+                    painter.fillRect(QRectF(x, top + strip + 5, 10, 10), QColor(REASON_COLORS[code]))
+                    painter.setPen(QColor('#c3cbd6'))
+                    width = painter.fontMetrics().horizontalAdvance(words)
+                    painter.drawText(QRectF(x + 14, top + strip, width + 4, LEGEND_HEIGHT),
+                                     Qt.AlignmentFlag.AlignVCenter, words)
+                    x += width + 32
+                return
+            counting = name == 'people'
+            values = people['count'] if counting else people['area']
+            need = (profile['min_count'] if counting else profile['min_area']) if profile else 0
+            if counting:
+                high = max(max(values), need, 1) * 1.3
+            else:
+                # About twice the bar, so "well short" and "just short" look different; never less than the bar.
+                biggest = max(values) * 1.1
+                high = max(5.0, need * 1.15, min(2 * need, biggest) if need else biggest)
+            floor = top + height
+            y = lambda value: floor - min(high, max(0.0, value)) / high * (height - 2)
+            for t, value in zip(times, values):
+                if value > 0:
+                    x, right = edges(t)
+                    painter.fillRect(QRectF(x, y(value), max(1., right - x), floor - y(value)),
+                                     QColor(PASSES if value >= need else FALLS_SHORT))
+            if need:
+                painter.setPen(QPen(QColor('#dfe6ef'), 1, Qt.PenStyle.DashLine))
+                painter.drawLine(QPointF(LEFT, y(need)), QPointF(self.width() - RIGHT, y(need)))
+            # The numbers themselves, on every stretch wide enough to carry one.
+            font = QFont('Segoe UI', 9)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(QColor('#ffffff'))
+            groups = runs(values) if counting else runs([value > 0 for value in values])
+            for value, first, last in groups:
+                x, right = edges(times[first])[0], edges(times[last])[1]
+                if not value or right - x < (14 if counting else 34):
+                    continue
+                peak = value if counting else max(values[first:last + 1])
+                text = f'{peak}' if counting else f'{peak:.0f}%'
+                painter.drawText(QRectF(x, max(top, y(peak) - 15), right - x, 14), Qt.AlignmentFlag.AlignCenter, text)
+            if counting and not people.get('counted'):
+                self.note(painter, top, height, 'Nobody was found in this video')
         elif name == 'agreement':
             for run in result.get('agreement') or []:
                 x, end = self.x_of(run['start_sec']), self.x_of(run['end_sec'])
@@ -416,13 +577,25 @@ class PredictionTracks(QWidget):
             super().wheelEvent(event)
 
     def leaveEvent(self, event):
-        if self.hover_clip is not None:
-            self.hover_clip = None
-            self.update()
+        self.hover_clip = self.hover_x = None
+        self.hover_text = ''
+        QToolTip.hideText()
+        self.update()
+
+    def show_hover(self, event, text):
+        """The readout beside the mouse. Shown afresh on every move: a widget's ordinary tooltip appears once and
+        then stays as it was however far the mouse travels along the row."""
+        self.hover_text = text
+        QToolTip.showText(event.globalPosition().toPoint(), text, self)
 
     def mouseMoveEvent(self, event):
         if not self.result or event.position().x() < LEFT:
+            if self.hover_x is not None:
+                self.hover_x = None
+                self.update()
             return
+        self.hover_x = event.position().x()
+        self.update()
         name, title, _top, _height = self.row_at(event.position().y())
         seconds = self.seconds_at(event.position().x())
         clip = self.clip_at(event.position().x(), event.position().y())
@@ -439,19 +612,18 @@ class PredictionTracks(QWidget):
             s = next((s for s in self.result.get('agreement') or [] if s['start_sec'] <= seconds < s['end_sec']), None)
             if s:
                 text = f"{s['status']} with {self.result.get('agreement_basis')}, {s['start_sec']:.0f}-{s['end_sec']:.0f}s"
-        elif name == 'people':
-            people = self.result.get('people') or {}
-            if people.get('t'):
-                index = min(range(len(people['t'])), key=lambda i: abs(people['t'][i] - seconds))
-                kept = 'meets your people filter' if people['matched'][index] else 'below your people filter'
-                text = (f"{people['count'][index]} in view, {people['area'][index]:.0f}% of the frame at "
-                        f"{clock(seconds)} - {kept}")
+        elif name in PEOPLE_ROWS:
+            lines = self.people_lines(seconds)
+            if lines:
+                profile = self.judged()
+                text = '\n'.join([f'At {clock(seconds)}' + (f", judged against {profile['name']}" if profile else '')]
+                                 + lines)
         elif name == 'clips':
             text = (f"{clip['profile']}: {clip['start_sec']:.1f}-{clip['end_sec']:.1f}s\n{clip['clip_path']}\n"
                     'Click to play it here; right-click for more.' if clip else 'No clip here')
-            self.setToolTip(text)
+            self.show_hover(event, text)
             return
-        self.setToolTip(text + '\nClick to jump here. Ctrl + wheel zooms.')
+        self.show_hover(event, text + '\nClick to jump here. Ctrl + wheel zooms.')
 
 
 def open_file(path):
@@ -641,6 +813,15 @@ class CutterReviewWindow(base.ReviewWindow):
         actions = QHBoxLayout()
         self.extra_tracks.show()
         actions.addWidget(self.extra_tracks)
+        # With several profiles in use, the people rows and "Why not kept" answer for one of them at a time.
+        self.judge_label = QLabel('People rows judged against')
+        self.judge_profile = QComboBox()
+        self.judge_profile.setToolTip('The profile whose "people in view" and "people fill" settings are the bars '
+                                      'drawn on the people rows, and whose clips "Why not kept" explains.')
+        self.judge_profile.currentIndexChanged.connect(self.choose_judged_profile)
+        actions.addSpacing(18)
+        actions.addWidget(self.judge_label)
+        actions.addWidget(self.judge_profile)
         actions.addStretch()
         for button in (self.review_button, self.exclude_button):
             button.setParent(self.top_panel)
@@ -670,6 +851,27 @@ class CutterReviewWindow(base.ReviewWindow):
     def view_fit(self):
         self.view.set(0, self.view.duration)
 
+    # ------------------------------------------------------------------------------------------------ people
+    def choose_judged_profile(self, index):
+        self.comparison.profile_index = max(0, index)
+        self.comparison.update()
+        self.update_overlay_graphics()
+
+    def refresh_judged_profiles(self):
+        """Offer the profiles this video was judged against; the choice is only shown when there is one to make."""
+        if not hasattr(self, 'judge_profile'):
+            return
+        names = [profile['name'] for profile in self.comparison.people().get('profiles') or []]
+        if names != [self.judge_profile.itemText(i) for i in range(self.judge_profile.count())]:
+            self.judge_profile.blockSignals(True)
+            self.judge_profile.clear()
+            self.judge_profile.addItems(names)
+            self.judge_profile.setCurrentIndex(min(self.comparison.profile_index, max(0, len(names) - 1)))
+            self.judge_profile.blockSignals(False)
+            self.comparison.profile_index = max(0, self.judge_profile.currentIndex())
+        for widget in (self.judge_label, self.judge_profile):
+            widget.setVisible(len(names) > 1)
+
     # ------------------------------------------------------------------------------------------------ base hooks
     def refresh_ui(self):
         super().refresh_ui()
@@ -687,6 +889,7 @@ class CutterReviewWindow(base.ReviewWindow):
         source = self.current_video_path()
         result = self.results.get(base.key(source)) if source else None
         self.comparison.result = result
+        self.refresh_judged_profiles()
         view.reset(float(result['duration_sec']) if result else 0.0)
         self.checks = checks_from(result.get('agreement')) if result else []
         self.update_check_label()
@@ -722,11 +925,8 @@ class CutterReviewWindow(base.ReviewWindow):
         font = QFont('Segoe UI', 10)
         font.setBold(True)
         self.overlay_text.setFont(font)
-        people = result.get('people') or {}
-        seen = ''
-        if people.get('t'):
-            index = min(range(len(people['t'])), key=lambda i: abs(people['t'][i] - position))
-            seen = f"  |  {people['count'][index]} in view ({people['area'][index]:.0f}%)"
+        seen = self.comparison.people_caption(position)
+        seen = f'  |  {seen}' if seen else ''
         self.overlay_text.setPlainText(f"{at('final')}  |  V4 {at('v4')}  |  Audio {at('audio')}  |  "
                                        f"Motion {at('motion')}{seen}  |  {labeler.seconds_to_label(position)}")
         rect = self.overlay_text.boundingRect()
@@ -842,6 +1042,7 @@ class CutterReviewWindow(base.ReviewWindow):
         elif source is not None:
             result = self.results.get(base.key(source))
             self.comparison.result = result
+            self.refresh_judged_profiles()
             self.checks = checks_from(result.get('agreement')) if result else []
             self.update_check_label()
             self.comparison.update()

@@ -69,7 +69,8 @@ class ReviewTab(QWidget):
             self.show_message('This folder is already open in another labeller window. Close it, then come back here.')
             return
         try:
-            build_review_run(state, settings.input_folder, locked=True, profiles=settings.profiles)
+            build_review_run(state, settings.input_folder, locked=True, profiles=settings.profiles,
+                             phases_enabled=settings.phases_enabled, people_enabled=settings.people_enabled)
             window = window_class()(run, embedded=True)
         except Exception as exc:  # noqa: BLE001 - shown to the user instead of crashing the app
             lock.__exit__(None, None, None)
@@ -87,7 +88,8 @@ class ReviewTab(QWidget):
         if self.window is None:
             return
         from cutter_v4.review import build_review_run
-        build_review_run(self.state, settings.input_folder, locked=True, profiles=settings.profiles)
+        build_review_run(self.state, settings.input_folder, locked=True, profiles=settings.profiles,
+                         phases_enabled=settings.phases_enabled, people_enabled=settings.people_enabled)
         self.window.reload_run()
         self.stale = False
 

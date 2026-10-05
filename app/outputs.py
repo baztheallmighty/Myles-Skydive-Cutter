@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import threading
 
 from app.spans import clip_filename, slugify
 from v3_poc.common import digest, key, write_json
@@ -13,8 +14,10 @@ OUTPUT_LAYOUTS = {
     'per_clip': 'A folder per clip, grouped by video',
     'flat': 'All clips in one folder',
     'mirror': 'Same folders as the input videos',
+    'by_profile': 'A folder per profile, clips named after the video',
 }
 NAMING_VERSION = 2
+NAMES_LOCK = threading.Lock()   # several videos may be cut side by side; names are handed out one at a time
 
 
 def source_label(source, input_folder):
@@ -92,8 +95,51 @@ def clip_suffix(source):
     return suffix if suffix.casefold() in MULTI_LENS_SUFFIXES else ''
 
 
-def clip_destination(root, layout, output_name, profile_name, index, start, end, phase, folder='', source=''):
+def profile_root(settings, profile):
+    """The folder a profile's clips go under. Only the folder-per-profile layout gives each profile its own."""
+    if settings.output_layout != 'by_profile':
+        return Path(settings.output_folder)
+    from app.settings import safe_folder_name
+    if profile.folder and Path(profile.folder).is_absolute():
+        return Path(profile.folder)
+    return Path(settings.output_folder) / (profile.folder or safe_folder_name(profile.name) or 'clips')
+
+
+def plain_name(state, source, output_name):
+    """True when this video may use its own file name for clips; False when another video got there first.
+
+    Two cards can each hold a GOPR0001.MP4. The first one processed keeps the plain name, remembered in the state
+    folder, and the other has a short code added, so neither ever overwrites the other and both keep the same names
+    on every later run.
+    """
+    path = Path(state) / 'clip_names.json'
+    stem = Path(source).stem.casefold()
+    with NAMES_LOCK:
+        try:
+            names = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            names = {}
+        owner = names.get(stem)
+        if owner is None:
+            names[stem] = owner = output_name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_json(path, names)
+        return owner == output_name
+
+
+def named_clip(source, output_name, profile_name, index, total, plain=True):
+    """A clip named after its video: 'GOPR0001 - A grade.mp4', numbered when a video gives several."""
+    stem = safe_stem(Path(source).stem)
+    code = '' if plain else f' [{output_name.rsplit("_", 1)[-1][:6]}]'
+    number = f' {index}' if total > 1 else ''
+    return f'{stem}{code} - {safe_stem(profile_name)}{number}{clip_suffix(source) or ".mp4"}'
+
+
+def clip_destination(root, layout, output_name, profile_name, index, start, end, phase, folder='', source='',
+                     total=1, plain=True):
     root = Path(root)
+    if layout == 'by_profile':   # ``root`` is the profile's own folder here
+        return root / named_clip(source or output_name, output_name, profile_name, index, total, plain)
     profile = slugify(profile_name)
     filename = clip_filename(index, start, end, phase)
     suffix = clip_suffix(source) if source else ''
@@ -115,24 +161,34 @@ def clip_manifest(root, layout, output_name, profile_name):
 
 
 def layout_example(layout):
+    if layout == 'by_profile':
+        return str(Path('Clips') / 'Exit + Freefall' / named_clip('GOPR0001.MP4', 'GOPR0001_a7c91e3f',
+                                                                   'Exit + Freefall', 1, 1))
     path = clip_destination(Path('Clips'), layout, 'GOPR0001_a7c91e3f',
                             'Exit + Freefall', 1, 42, 67, 'freefall', folder='2024/Boogie')
     return str(path)
 
 
-def owned_clip(row, root, layout, identity, profile_name):
-    """A manifest entry grants cleanup ownership only of its exact generated path."""
+def owned_clip(row, root, layout, identity, profile_name, total=1):
+    """A manifest entry grants cleanup ownership only of its exact generated path.
+
+    ``total``: how many clips the manifest holds, which decides whether names in the folder-per-profile layout
+    carry a number.
+    """
     try:
         if (row['source_id'] != identity.identifier or row['source_sha256'] != identity.content_sha256
                 or row['output_layout'] != layout or row['profile'] != profile_name
                 or key(row['source_video']) != identity.source_key):
             return False
-        expected = clip_destination(root, layout, identity.output_name, profile_name,
-                                    int(row['clip_index']), float(row['start_sec']),
-                                    float(row['end_sec']), row['dominant_phase'],
-                                    folder=row.get('source_folder') or '', source=row['source_video'])
         candidate = Path(row['clip_path']).resolve()
-        return candidate == expected.resolve() and candidate.is_relative_to(Path(root).resolve())
+        # In the folder-per-profile layout a name is plain or coded; either is one this video could have been given.
+        expected = [clip_destination(root, layout, identity.output_name, profile_name,
+                                     int(row['clip_index']), float(row['start_sec']),
+                                     float(row['end_sec']), row['dominant_phase'],
+                                     folder=row.get('source_folder') or '', source=row['source_video'],
+                                     total=total, plain=plain).resolve()
+                    for plain in ((True, False) if layout == 'by_profile' else (True,))]
+        return candidate in expected and candidate.is_relative_to(Path(root).resolve())
     except (KeyError, TypeError, ValueError):
         return False
 

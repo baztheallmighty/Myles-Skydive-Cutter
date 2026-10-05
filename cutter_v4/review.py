@@ -61,11 +61,49 @@ def clips_from_manifests(manifests: list[str]) -> list[dict]:
     return clips
 
 
-def people_track(csv_path, requirement=None):
+# Why a moment is, or is not, in a profile's clips. The first two are kept; the rest say which test it failed.
+REASONS = {'kept': 'kept', 'extra': 'kept as extra footage', 'joined': 'joined: people still in view',
+           'phase': 'other part of the jump',
+           'nobody': 'nobody found', 'few': 'too few people', 'small': 'people too small',
+           'short': 'match too short'}
+
+
+def judge(profile, rows, duration, phases_enabled=True, people_enabled=True):
+    """One reason per timeline row for this profile, by the same rules the cutter applies.
+
+    The count and the share of the picture are separate tests, so a second with someone in view who fills 2% of
+    the picture is 'small', not 'nobody'.
+    """
+    from app.profiles import joined_flags, matches, profile_spans
+    spans = profile_spans(profile, rows, duration, phases_enabled, people_enabled)
+    _flags, by_people = joined_flags(profile, rows, phases_enabled, people_enabled)
+    reasons = []
+    for index, row in enumerate(rows):
+        t = float(row['time_sec'])
+        count = int(float(row.get('person_count') or 0))
+        area = float(row.get('total_person_area_percent') or 0)
+        if any(start <= t < end for start, end in spans):
+            reasons.append('kept' if matches(profile, row, phases_enabled, people_enabled)
+                           else 'joined' if index in by_people else 'extra')
+        elif phases_enabled and row.get('phase') not in profile.phases:
+            reasons.append('phase')
+        elif people_enabled and not count and (profile.min_person_count or profile.min_total_area_percent):
+            reasons.append('nobody')
+        elif people_enabled and count < profile.min_person_count:
+            reasons.append('few')
+        elif people_enabled and area < profile.min_total_area_percent:
+            reasons.append('small')
+        else:
+            reasons.append('short')   # it matched, but the stretch was shorter than the profile keeps
+    return reasons
+
+
+def people_track(csv_path, requirement=None, profiles=None, duration=None, phases_enabled=True, people_enabled=True):
     """Per-second people from the timeline CSV: how many were seen, how much frame they filled, what matched.
 
     This is what decides whether a second survives a profile's people filter, so the review can show it beside the
-    phases instead of leaving an empty clip unexplained.
+    phases instead of leaving an empty clip unexplained. ``profiles``: each profile in use is judged second by
+    second, so the review can say which test a moment failed.
     """
     import csv as csv_module
     try:  # the timeline CSV, not a review CSV, so it is read plainly
@@ -90,6 +128,17 @@ def people_track(csv_path, requirement=None):
              'counted': any(counts), 'max_count': max(counts), 'max_area': max(areas)}
     if requirement:
         track['requirement'] = requirement
+    track['profiles'] = []
+    for profile in profiles or []:
+        if not getattr(profile, 'enabled', True):
+            continue
+        try:
+            reasons = judge(profile, rows, float(duration or times[-1] + 1), phases_enabled, people_enabled)
+        except (KeyError, TypeError, ValueError):
+            continue
+        track['profiles'].append({'name': profile.name, 'min_count': profile.min_person_count if people_enabled else 0,
+                                  'min_area': float(profile.min_total_area_percent) if people_enabled else 0.0,
+                                  'reason': reasons})
     return track
 
 
@@ -104,7 +153,8 @@ def people_requirement(profiles):
             'min_area': float(easiest.min_total_area_percent)}
 
 
-def build_review_run(state_directory: Path, input_folder: str = '', locked: bool = False, profiles=None) -> Path:
+def build_review_run(state_directory: Path, input_folder: str = '', locked: bool = False, profiles=None,
+                     phases_enabled: bool = True, people_enabled: bool = True) -> Path:
     """Refresh the review folder from the cutter's ledger. Human edits in review.csv are never overwritten.
 
     ``locked``: the caller (the app's Review tab) already holds the review folder's lock.
@@ -135,7 +185,8 @@ def build_review_run(state_directory: Path, input_folder: str = '', locked: bool
             result.update(source_sha256=entry.get('source_sha256', ''), known_split='',
                           clips=clips_from_manifests(entry.get('manifests')), output_name=name,
                           labels_used=entry.get('labels', 'model'))
-            people = people_track(entry.get('csv_path') or '', people_requirement(profiles))
+            people = people_track(entry.get('csv_path') or '', people_requirement(profiles), profiles,
+                                  result.get('duration_sec'), phases_enabled, people_enabled)
             if people:
                 result['people'] = people
             # "Final (cut)" must show what the clips were actually cut from.

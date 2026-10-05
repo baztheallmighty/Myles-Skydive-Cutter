@@ -1,7 +1,7 @@
 """Camera motion: the accelerometer trace, its three events, and the motion-only phase classifier.
 
-Motion comes from metadata the camera writes into the file (GoPro GPMF, DJI djmd, CAMM); only the MP4 index and the
-small metadata samples are read, never the video frames. Cameras without it (older GoPros, most other brands) simply
+Motion comes from metadata the camera writes into the file (GoPro GPMF, DJI djmd, CAMM, the Insta360 trailer); only
+the MP4 index and the small metadata samples are read, never the video frames. Cameras without it (older GoPros, most other brands) simply
 have no motion track.
 
 The classifier sees nothing but motion: per-second acceleration mean, spread and peak plus gyro, with 8 s of context.

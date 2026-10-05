@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from contextlib import contextmanager
 import json
 import os
+import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -31,15 +34,16 @@ sys.path.insert(0, str(ROOT / 'v3_poc'))
 os.environ.setdefault('NUMBA_CACHE_DIR', str(ROOT / 'cache' / 'numba'))
 
 import numpy as np  # noqa: E402
-NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)  # never flash a console window over the app
 import torch  # noqa: E402
 
 from common import PHASES, intervals  # noqa: E402
+from cutter_v4.media import (FPS, NO_WINDOW, PRIMARY_VIDEO_MAP, SIZE, VIEWS, build_proxy,  # noqa: E402,F401
+                             hardware_decode, has_back_view, probe, refine_360_kind, resolve_view, video_map,
+                             view_filter)
 
-SIZE, FPS, FRAMES, CLIP_SECONDS = 160, 12.0, 24, 2.0
+FRAMES, CLIP_SECONDS = 24, 2.0
 KINETICS_MEAN = (0.43216, 0.394666, 0.37645)
 KINETICS_STD = (0.22803, 0.22145, 0.216989)
-PRIMARY_VIDEO_MAP = '0:V:0'  # upper-case V skips cover images
 AUDIO_FREEFALL_MAX_EXTENSION = 30
 AFTER_FREEFALL = ('break_off', 'opening_parachutes')
 
@@ -91,134 +95,6 @@ def phase_name_at(segments: list[dict], t: float):
         if segment['start_sec'] <= t < segment['end_sec']:
             return segment['phase']
     return None
-
-
-# ------------------------------------------------------------------------------------------------------ media
-def probe(source: Path, ffprobe: str) -> dict:
-    result = subprocess.run([ffprobe, '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(source)],
-                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300,
-                            creationflags=NO_WINDOW)
-    if result.returncode:
-        raise RuntimeError('Could not read this file as a video: ' + result.stderr[-600:])
-    payload = json.loads(result.stdout)
-    streams = payload.get('streams', [])
-    videos = [s for s in streams if s.get('codec_type') == 'video' and not s.get('disposition', {}).get('attached_pic')]
-    audio = [s for s in streams if s.get('codec_type') == 'audio']
-    if not videos:
-        raise ValueError('The file has no video stream.')
-
-    def number(value, default=0.0):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    stream = videos[0]
-    duration = number(stream.get('duration'), number(payload.get('format', {}).get('duration')))
-    width, height = int(stream.get('width') or 0), int(stream.get('height') or 0)
-    if not (width and height and duration > 0):
-        raise ValueError('Could not determine the video size and duration.')
-    # These are the survey's rules, the ones the training proxies were built with.
-    sizes = [(int(v.get('width') or 0), int(v.get('height') or 0)) for v in videos]
-    kind = 'flat'
-    if len(sizes) >= 2 and sizes[0] == sizes[1] and width > 2.5 * height:
-        kind = 'max_dual'        # GoPro MAX: one lens per track, front first
-    elif width == 2 * height and width >= 2000:
-        kind = 'equirect'        # stitched 360
-    elif width / height > 2.2:
-        kind = 'equirect'
-    elif height > width:
-        kind = 'portrait'
-    start = number(stream.get('start_time'))
-    return {'duration_sec': duration, 'width': width, 'height': height, 'kind': kind,
-            'video_stream_count': len(videos), 'audio_stream_count': len(audio),
-            'audio_offset_sec': number(audio[0].get('start_time')) - start if audio else None}
-
-
-VIEWS = ('front', 'back')
-# A dual-fisheye frame is two circles side by side, so its corners are black; a stitched sphere fills them.
-FISHEYE_CORNER_RATIO = 0.3
-
-
-def refine_360_kind(source: Path, ffmpeg: str, media: dict) -> dict:
-    """Two-to-one footage is either a stitched sphere or two raw fisheye circles; only the pixels say which.
-
-    This never changes ``kind``: the front view must stay the one the models were trained on. It only records
-    whether the frame holds two fisheye circles, which is what the back view has to unwrap.
-    """
-    if media['kind'] != 'equirect' or 'dual_fisheye' in media:
-        return media
-    when = max(0.0, min(media['duration_sec'] * .3, media['duration_sec'] - 1))
-    command = [ffmpeg, '-hide_banner', '-nostdin', '-loglevel', 'error', '-ss', f'{when:.3f}', '-i', str(source),
-               '-map', PRIMARY_VIDEO_MAP, '-frames:v', '1', '-vf', 'scale=64:32,format=gray', '-f', 'rawvideo', 'pipe:1']
-    result = subprocess.run(command, capture_output=True, creationflags=NO_WINDOW)
-    if result.returncode or len(result.stdout) < 64 * 32:
-        return media
-    frame = np.frombuffer(result.stdout[:64 * 32], dtype=np.uint8).reshape(32, 64).astype(np.float32)
-    halves = (frame[:, :32], frame[:, 32:])
-    corners, centres = [], []
-    for half in halves:
-        corners += [half[:6, :6].mean(), half[:6, -6:].mean(), half[-6:, :6].mean(), half[-6:, -6:].mean()]
-        centres.append(half[10:22, 10:22].mean())
-    centre = float(np.mean(centres))
-    return {**media, 'dual_fisheye': bool(centre > 20 and float(np.mean(corners)) < FISHEYE_CORNER_RATIO * centre)}
-
-
-def has_back_view(media: dict) -> bool:
-    """Only 360 footage has anything behind the camera to look at."""
-    if media['kind'] == 'max_dual':
-        return media['video_stream_count'] > 1
-    return media['kind'] == 'equirect'
-
-
-def video_map(media: dict, view: str = 'front') -> str:
-    """The MAX keeps one lens per track, so the back view is a different track, not a different crop."""
-    if view == 'back' and media['kind'] == 'max_dual' and media['video_stream_count'] > 1:
-        return '0:V:1'
-    return PRIMARY_VIDEO_MAP
-
-
-def view_filter(kind: str, width: int, height: int, view: str = 'front', fps: float = FPS, size: int = SIZE,
-                dual_fisheye: bool = False) -> str:
-    """The V4 view rules: 12 fps, fitted into 160x160 with black bars; front view for 360 footage.
-
-    ``fps`` and ``size`` are for other callers (people counting) that need the same view at their own rate.
-    """
-    fit = (f'scale={size}:{size}:force_original_aspect_ratio=decrease:flags=area,format=rgb24,'
-           f'pad={size}:{size}:(ow-iw)/2:(oh-ih)/2:black')
-    sample = f'fps={fps:g}'
-    if kind in {'flat', 'portrait'}:
-        return f'{sample},{fit}'
-    if kind == 'max_dual':
-        crop_w = min(width, 2 * int(height * 16 / 9 / 2))
-        return f'{sample},crop={crop_w}:{height}:{(width - crop_w) // 2}:0,{fit}'
-    crop_w, crop_h = 2 * int(width * 160 / 360 / 2), 2 * int(height * 90 / 180 / 2)
-    centre = f'crop={crop_w}:{crop_h}:{(width - crop_w) // 2}:{(height - crop_h) // 2}'
-    if view == 'back':
-        if dual_fisheye:
-            # Two raw fisheye circles: unwrap the far lens, since there is no trained crop for that side.
-            return (f'{sample},v360=dfisheye:flat:ih_fov=193:iv_fov=193:h_fov=120:v_fov=90:yaw=180:'
-                    f'w={2 * (height // 2)}:h={2 * int(height * .75 / 2)},{fit}')
-        # A stitched sphere: turn it 180 degrees, then take the window the front view uses.
-        return f'{sample},v360=e:e:yaw=180,{centre},{fit}'
-    return f'{sample},{centre},{fit}'
-
-
-def build_proxy(ffmpeg: str, source: Path, media: dict, target: Path, view: str = 'front') -> None:
-    """A small 12 fps proxy, encoded exactly as the training proxies were."""
-    temporary = target.with_suffix('.tmp.mp4')
-    command = [ffmpeg, '-hide_banner', '-nostdin', '-loglevel', 'error', '-i', str(source),
-               '-map', video_map(media, view), '-an', '-sn',
-               '-vf', view_filter(media['kind'], media['width'], media['height'], view,
-                                  dual_fisheye=bool(media.get('dual_fisheye'))),
-               '-c:v', 'libx264', '-threads', '2', '-preset', 'veryfast', '-crf', '23', '-g', '12', '-keyint_min', '12',
-               '-sc_threshold', '0', '-pix_fmt', 'yuv420p', '-y', str(temporary)]
-    result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace',
-                            creationflags=NO_WINDOW)
-    if result.returncode:
-        temporary.unlink(missing_ok=True)
-        raise RuntimeError('Could not decode this video: ' + result.stderr[-600:])
-    os.replace(temporary, target)
 
 
 # ------------------------------------------------------------------------------------------------------ models
@@ -297,14 +173,75 @@ def visual_windows(ffmpeg: str, proxy: Path, models: Models, batch_size: int):
     return torch.cat(features), torch.cat(logits), np.asarray(centres, dtype=np.float64)
 
 
+CACHE_LOCK_STALE_SECONDS = 600   # a holder that died leaves its lock; nobody takes this long to analyse one sound
+
+
+def compile_cache_marker(folder: Path) -> Path:
+    """The file that says this cache was filled, start to finish, by one process, for these library versions."""
+    from importlib import metadata
+    versions = []
+    for package in ('numba', 'librosa'):
+        try:
+            versions.append(metadata.version(package))
+        except metadata.PackageNotFoundError:
+            versions.append('none')
+    return folder / ('.filled-' + '-'.join(versions) + f'-py{sys.version_info.major}{sys.version_info.minor}')
+
+
+@contextmanager
+def compile_cache():
+    """Hold the sound analysis's compile cache while it is being filled for the first time.
+
+    The audio features use librosa, which compiles its inner loops on first use and saves them under
+    NUMBA_CACHE_DIR. Several engines filling that folder at once (videos processed side by side on a fresh
+    install) leave it damaged, and from then on every engine crashes the moment it analyses sound, even one at a
+    time. So the first fill is done by one engine while any others wait; once the marker is there the cache is only
+    read, which is safe side by side. A cache with no marker is not trusted: it is emptied and filled again.
+    """
+    folder = Path(os.environ['NUMBA_CACHE_DIR'])
+    marker = compile_cache_marker(folder)
+    if marker.is_file():
+        yield
+        return
+    lock = folder.with_name(folder.name + '.filling')
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > CACHE_LOCK_STALE_SECONDS:
+                    lock.rmdir()
+                    continue
+            except OSError:
+                pass
+            time.sleep(.5)
+    try:
+        if marker.is_file():   # another engine filled it while this one waited
+            yield
+            return
+        log('audio: preparing the sound analysis for first use')
+        shutil.rmtree(folder, ignore_errors=True)
+        folder.mkdir(parents=True, exist_ok=True)
+        yield
+        marker.write_text('filled by one engine; safe to read side by side\n', encoding='utf-8')
+    finally:
+        try:
+            lock.rmdir()
+        except OSError:
+            pass
+
+
 def audio_track(source: Path, ffmpeg: str, work: Path, media: dict, models: Models):
     """The V3 audio model's ordered track, exactly as the V3 pipeline builds it."""
     if not media['audio_stream_count']:
         return [], 'no_audio_stream'
-    from cutter_v4.audio import audio_features
 
     try:
-        values, centres, _duration = audio_features(source, ffmpeg, work, media['audio_offset_sec'] or 0.0)
+        with compile_cache():
+            from cutter_v4.audio import audio_features
+            values, centres, _duration = audio_features(source, ffmpeg, work, media['audio_offset_sec'] or 0.0)
     except Exception as exc:  # noqa: BLE001 - audio is optional; the video result stands without it
         log(f'audio unavailable: {exc}')
         return [], 'error'
@@ -385,6 +322,20 @@ def resolve_device(device: str) -> str:
     return 'cpu'
 
 
+PROXY_WAIT_SECONDS = 6 * 3600   # longer than any read of one video; a caller that dies leaves its marker or nothing
+
+
+def wait_for(proxy: Path) -> None:
+    """Until the caller's read of the source has written the proxy. ``proxy.failed`` beside it means it never will."""
+    gave_up, deadline = proxy.with_name('proxy.failed'), time.monotonic() + PROXY_WAIT_SECONDS
+    while not proxy.is_file():
+        if gave_up.exists():
+            raise RuntimeError('The video could not be read, so there is nothing to classify.')
+        if time.monotonic() > deadline:
+            raise TimeoutError('The prepared proxy never arrived.')
+        time.sleep(.1)
+
+
 def intel_mac() -> bool:
     """Intel Macs use the processor automatically; their Apple GPU path is untested with these models."""
     import platform
@@ -392,10 +343,23 @@ def intel_mac() -> bool:
 
 
 def classify(source: Path, out_dir: Path, device: str, ffmpeg: str, ffprobe: str, batch_size: int = 8,
-             view: str = 'front') -> dict:
+             view: str = 'front', hardware: str = 'auto', proxy_ready: bool = False) -> dict:
+    """``proxy_ready``: the caller writes ``out_dir/proxy.mp4`` from its own read of the source (the app does, when
+    it counts people from the same decode), so the source's picture is not read again here.
+
+    The proxy need not exist yet. The engine is started alongside that read, loads its models and does the sound and
+    the motion data while the read is still going, then waits for the proxy. The answers are the same in either
+    order; only the waiting is shared out."""
     from cutter_v4 import motion as motion_module
 
     began = time.monotonic()
+    stages, mark = {}, began
+
+    def lap(name):
+        nonlocal mark
+        now = time.monotonic()
+        stages[name] = round(now - mark, 1)
+        mark = now
     out_dir.mkdir(parents=True, exist_ok=True)
     chosen = torch.device(resolve_device(device))
     if chosen.type == 'cuda' and not torch.cuda.is_available():
@@ -405,32 +369,57 @@ def classify(source: Path, out_dir: Path, device: str, ffmpeg: str, ffprobe: str
     media = probe(source, ffprobe)
     if media['duration_sec'] < CLIP_SECONDS:
         raise ValueError(f'The video is shorter than {CLIP_SECONDS:g} seconds.')
-    if view == 'back' and not has_back_view(media):
-        view = 'front'   # an ordinary camera has nothing behind it to look at
-    if view == 'back' and media['kind'] == 'equirect':
-        media = refine_360_kind(source, ffmpeg, media)   # the back view needs to know which 360 layout this is
-    media['view'] = view
+    media, view = resolve_view(source, ffmpeg, media, view)
     log(f'engine {ENGINE_REVISION} on {chosen}; {media["duration_sec"]:.1f}s {media["kind"]} video, {view} view')
     models = Models(chosen)
+    lap('load_models')
+    duration = media['duration_sec']
+
+    def sound_and_motion():
+        log('audio: analysing sound')
+        track, status = audio_track(source, ffmpeg, out_dir, media, models)
+        lap('audio')
+        log('motion: reading camera motion data')
+        try:
+            found = motion_module.analyse(source, monotonic, motion_module.load_classifier())
+        except Exception as exc:  # noqa: BLE001 - unreadable metadata only removes the motion check
+            found = {'available': False, 'scan_status': f'error: {type(exc).__name__}'}
+        lap('motion')
+        return track, status, found
+
     proxy = out_dir / 'proxy.mp4'
     try:
-        log('phases: building proxy')
-        build_proxy(ffmpeg, source, media, proxy, view=view)
+        # The picture is read while the sound and the motion data are dealt with: by the caller when it is counting
+        # people from the same read, otherwise on a thread here.
+        reading, failed = None, []
+        if not proxy_ready:
+            log('phases: building proxy')
+
+            def read_picture():
+                try:
+                    build_proxy(ffmpeg, source, media, proxy, view=view,
+                                hardware=hardware_decode(ffmpeg, source, media, view, hardware))
+                except BaseException as exc:  # noqa: BLE001 - raised below, on the thread that is waiting for it
+                    failed.append(exc)
+            reading = threading.Thread(target=read_picture, daemon=True)
+            reading.start()
+        audio, audio_status, motion = sound_and_motion()
+        if reading is None:
+            wait_for(proxy)
+            lap('wait_for_video')
+        else:
+            reading.join()
+            if failed:
+                raise failed[0]
+            lap('read_video')
         features, window_logits, centres = visual_windows(ffmpeg, proxy, models, batch_size)
     finally:
         proxy.unlink(missing_ok=True)
-    duration = media['duration_sec']
     with torch.inference_mode():
         temporal_logits = models.temporal(features)
     probabilities = canonical(temporal_logits, models.class_names)
     v4 = clean(intervals(monotonic(probabilities), centres, duration, probabilities))
-    log('audio: analysing sound')
-    audio, audio_status = audio_track(source, ffmpeg, out_dir, media, models)
-    log('motion: reading camera motion data')
-    try:
-        motion = motion_module.analyse(source, monotonic, motion_module.load_classifier())
-    except Exception as exc:  # noqa: BLE001 - unreadable metadata only removes the motion check
-        motion = {'available': False, 'scan_status': f'error: {type(exc).__name__}'}
+    lap('video_model')
     motion_track = (segments_from_seconds(motion.get('phase_seconds', {}), duration)
                     if motion.get('available') and motion.get('phase_seconds') else [])
 
@@ -468,7 +457,7 @@ def classify(source: Path, out_dir: Path, device: str, ffmpeg: str, ffprobe: str
         'disagreement_fraction': round(disagree / compared, 4) if compared else None,
         'rules': {'boundary_snap': False, 'audio_freefall_extension_sec': extension,
                   'audio_freefall_max_extension_sec': AUDIO_FREEFALL_MAX_EXTENSION},
-        'review_flags': flags, 'timing_seconds': round(time.monotonic() - began, 1),
+        'review_flags': flags, 'timing_seconds': round(time.monotonic() - began, 1), 'stage_seconds': stages,
     }
     target = out_dir / 'result.json'
     temporary = target.with_suffix('.tmp')
@@ -489,9 +478,13 @@ def main() -> int:
     parser.add_argument('--ffprobe', required=True)
     parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--view', choices=VIEWS, default='front', help='which side of a 360 camera to classify')
+    parser.add_argument('--hardware-decode', choices=['auto', 'off'], default='auto',
+                        help='decode the video on the graphics hardware when that works for the file')
+    parser.add_argument('--proxy-ready', action='store_true',
+                        help='proxy.mp4 is already in the output folder; do not read the picture again')
     args = parser.parse_args()
     classify(args.source.resolve(), args.out_dir.resolve(), args.device, args.ffmpeg, args.ffprobe, args.batch_size,
-             view=args.view)
+             view=args.view, hardware=args.hardware_decode, proxy_ready=args.proxy_ready)
     return 0
 
 

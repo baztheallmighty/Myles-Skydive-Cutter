@@ -42,7 +42,7 @@ def window(tmp_path, monkeypatch):
     inputs.mkdir()
     clips.mkdir()
     save_settings(Settings(input_folder=str(inputs), output_folder=str(clips),
-                           csv_folder=str(clips / 'timelines')), path)
+                           csv_folder=str(clips / 'timelines'), mode='advanced'), path)
     monkeypatch.setattr(window_module, 'load_settings', lambda: settings_module.load_settings(path))
     monkeypatch.setattr(window_module, 'save_settings', lambda s: settings_module.save_settings(s, path))
 

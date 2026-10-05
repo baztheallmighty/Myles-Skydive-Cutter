@@ -37,14 +37,20 @@ class SpeedStore:
         except OSError:
             pass
 
-    def remaining_seconds(self, queued_durations, current_duration=None, current_elapsed=0.0):
-        """None until at least one video has been timed, or if a queued video's length is unknown."""
+    def remaining_seconds(self, queued_durations, current_duration=None, current_elapsed=0.0, running=(),
+                          side_by_side=1):
+        """None until at least one video has been timed, or if a queued video's length is unknown.
+
+        ``running``: (length, seconds so far) for each video in progress, when there are several.
+        ``side_by_side``: how many are processed at once, which shares the remaining work between them.
+        """
         if self.rate is None or any(d is None for d in queued_durations):
             return None
         total = sum(queued_durations) * self.rate
-        if current_duration:
-            total += max(0.0, current_duration * self.rate - current_elapsed)
-        return total
+        for duration, elapsed in [(current_duration, current_elapsed), *running]:
+            if duration:
+                total += max(0.0, duration * self.rate - elapsed)
+        return total / max(1, side_by_side)
 
 
 def describe(seconds):

@@ -57,8 +57,8 @@
     },
     "motion": {
       "file": "motion.joblib",
-      "sha256": "6a81786b50e085fe4ef3ae0ee203711243926ba37604da303c95415d3b74a03d",
-      "bytes": 1661684,
+      "sha256": "5b0a47bb12def95c5b2f40ced302fcca0b49db9ff228af1e0c72afad2be9a267",
+      "bytes": 1661368,
       "scikit_learn": "1.6.1",
       "training_videos": 722,
       "training_seconds": 84759,

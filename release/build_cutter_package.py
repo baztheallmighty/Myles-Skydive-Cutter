@@ -21,7 +21,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / 'release'
-VERSION = '2.4.2'
+VERSION = '2.5.0'
 MAC = '--mac' in sys.argv
 PLATFORM = 'macos' if MAC else 'windows'
 NAME = f'Skydive-Cutter-{VERSION}' + ('-macos' if MAC else '')
@@ -30,12 +30,12 @@ sys.path.insert(0, str(RELEASE))   # release/privacy.py
 
 FILES = {
     'app': ['__init__.py', 'main.py', 'cutting.py', 'detection.py', 'eta.py', 'ffmpeg_tools.py', 'health.py',
-            'monitor.py', 'outputs.py', 'people.py', 'profiles.py', 'progress.py', 'relocate.py', 'runs.py', 'runtime.py',
+            'help_text.py', 'load.py', 'monitor.py', 'outputs.py', 'people.py', 'profiles.py', 'progress.py', 'relocate.py', 'runs.py', 'runtime.py',
             'session.py', 'settings.py', 'spans.py', 'system.py', 'timeline.py'],
     'app/classifiers': ['__init__.py', 'contract.py', 'v4.py'],
-    'app/ui': ['__init__.py', 'check.svg', 'main_window.py', 'profile_editor.py', 'results.py', 'review_tab.py',
+    'app/ui': ['__init__.py', 'check.svg', 'help.py', 'main_window.py', 'profile_editor.py', 'results.py', 'review_tab.py',
                'theme.py'],
-    'cutter_v4': ['__init__.py', 'audio.py', 'engine.py', 'motion.py', 'networks.py', 'review.py', 'review_ui.py'],
+    'cutter_v4': ['__init__.py', 'audio.py', 'engine.py', 'media.py', 'motion.py', 'networks.py', 'review.py', 'review_ui.py'],
     'cutter_v4/models': ['MODELS.json', 'visual.pt', 'temporal.pt', 'audio.pt', 'motion.joblib'],
     # The labeller (_labeler.py, review.py) is inherited research code, frozen: see docs/HOW_IT_WORKS.md.
     'v3_poc': ['common.py', 'networks.py', 'review.py', 'review_exclusions.py', '_labeler.py', '_audio_features.py'],
