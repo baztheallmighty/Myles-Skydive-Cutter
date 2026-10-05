@@ -166,3 +166,27 @@ class TestWhatTheInstallerRelyOn:
         covered = installer.INSTALLED_FOLDERS + installer.INSTALLED_FILES
         assert not [name for name in INSTALLED_STATE if not any(fnmatch(name, pattern) for pattern in covered)]
         assert any(fnmatch('yolo26x.pt', pattern) for pattern in covered)   # a larger detector chosen later
+
+
+class TestTheMacPackageLeavesTheWindowsInstallerOut:
+    def docs(self):
+        from release import build_cutter_package as package
+        names = set(package.MAC_REWRITES) | set(package.MAC_DROPPED_SECTIONS)
+        return package, {name: (package.PACKAGE_ONLY / name).read_bytes().decode('utf-8') for name in names}
+
+    def test_every_passage_rewritten_for_macos_is_still_in_the_shared_documents(self):
+        package, docs = self.docs()
+        for name, text in docs.items():
+            package.mac_text(name, text)   # raises when a passage or section is no longer there
+
+    def test_the_macos_documents_do_not_send_anyone_to_the_start_menu_or_the_installer(self):
+        package, docs = self.docs()
+        for name, text in docs.items():
+            mac = package.mac_text(name, text)
+            assert 'Start menu' not in mac and 'LOCALAPPDATA' not in mac and '## The installer' not in mac, name
+            assert 'Skydive Cutter.cmd' not in mac and ('\r\n' in mac) == ('\r\n' in text), name
+
+    def test_a_reworded_passage_stops_the_macos_build(self):
+        package, docs = self.docs()
+        with pytest.raises(ValueError):
+            package.mac_text('docs/USER_GUIDE.md', docs['docs/USER_GUIDE.md'].replace('Start menu', 'menu'))

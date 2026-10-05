@@ -51,6 +51,29 @@ WINDOWS_ONLY_FILES = {'Setup.ps1', 'Skydive-Cutter.ps1', 'downloads.json', 'READ
 MAC_WORDS = {'Skydive Cutter.cmd': 'Skydive Cutter.command', 'Repair.cmd': 'Repair.command',
              'Skydive-Cutter.ps1': 'skydive-cutter.sh', 'Setup.ps1': 'setup.sh',
              f'Skydive-Cutter-{VERSION}-windows.zip': f'Skydive-Cutter-{VERSION}-macos.zip'}
+# Passages in the shared docs that are about the Windows installer, and what the macOS package says instead ('' drops
+# the passage). Each must be found exactly once, so a reworded document stops the macOS build instead of quietly
+# shipping Windows instructions.
+MAC_REWRITES = {
+    'docs/USER_GUIDE.md': [
+        ('1. Start **Skydive Cutter** from the Start menu if you used the installer, or double-click\n'
+         '   **`Skydive Cutter.cmd`** in the folder if you extracted the ZIP. The first run',
+         '1. Double-click **`Skydive Cutter.cmd`** in the folder you unzipped. The first run'),
+        ('Installing a new version over the old one, unzipping one beside it,', 'Unzipping a new version beside the old one,'),
+    ],
+    'docs/OUTPUT_REFERENCE.md': [
+        ('The application folder is where the app is installed: `%LOCALAPPDATA%\\Programs\\Skydive Cutter` with the '
+         'installer\nunless you chose another, or the folder you extracted the ZIP into.',
+         'The application folder is the folder you unzipped the app into.'),
+    ],
+    'docs/TROUBLESHOOTING.md': [
+        ('With the installer, start it from the Start menu. Nothing appears for a few seconds while the install is '
+         'checked,\nthen the window opens; if something is missing, a setup window you can watch opens instead. From '
+         'the ZIP, run\n`Skydive Cutter.cmd` from the complete, extracted folder. Either way it installs',
+         'Run `Skydive Cutter.cmd` from the complete, unzipped folder. It installs'),
+    ],
+}
+MAC_DROPPED_SECTIONS = {'docs/TROUBLESHOOTING.md': ['## The installer']}   # up to the next heading of the same level
 MAC_EXECUTABLE = {'setup.sh', 'skydive-cutter.sh', 'Skydive Cutter.command', 'Repair.command',
                   'Install Missing.command'}
 # What an install adds to a staged folder. Kept between builds so --stage-only can be tested with a real runtime;
@@ -77,6 +100,25 @@ def launcher(script: str, extra: str, always_pause: bool) -> str:
             # %* passes on anything typed after the name, e.g. Repair.cmd -Mode CPU.
             f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0{script}"{extra} %*\n'
             'set "SC_EXIT=%ERRORLEVEL%"\n' + pause + 'exit /b %SC_EXIT%\n')
+
+
+def mac_text(relative: str, text: str) -> str:
+    """A shared document as the macOS package carries it: no Windows installer, and the Mac's file names."""
+    ending = '\r\n' if '\r\n' in text else '\n'
+    text = text.replace('\r\n', '\n')
+    for heading in MAC_DROPPED_SECTIONS.get(relative, ()):
+        if text.count(f'\n{heading}\n') != 1:
+            raise ValueError(f'{relative}: expected one "{heading}" section to leave out of the macOS package')
+        start = text.index(f'\n{heading}\n') + 1
+        end = text.find('\n## ', start)
+        text = text[:start] + (text[end + 1:] if end >= 0 else '')
+    for old, new in MAC_REWRITES.get(relative, ()):
+        if text.count(old) != 1:
+            raise ValueError(f'{relative}: the passage rewritten for macOS was not found once: {old[:60]!r}')
+        text = text.replace(old, new)
+    for windows_word, mac_word in MAC_WORDS.items():
+        text = text.replace(windows_word, mac_word)
+    return text.replace('\n', ending)
 
 
 def compiled(path: Path) -> bool:
@@ -123,10 +165,7 @@ def stage() -> list[str]:
         target = DEST / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         if MAC and source.suffix == '.md':
-            text = source.read_text(encoding='utf-8')
-            for windows_word, mac_word in MAC_WORDS.items():
-                text = text.replace(windows_word, mac_word)
-            target.write_text(text, encoding='utf-8')
+            target.write_bytes(mac_text(relative, source.read_bytes().decode('utf-8')).encode('utf-8'))
         else:
             shutil.copyfile(source, target)
         names.append(relative)

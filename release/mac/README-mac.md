@@ -3,8 +3,10 @@
 Finds the jump phases in your skydiving footage, keeps the parts you want, and lets you correct anything it got
 wrong. Same app as the Windows version, same models, same results.
 
-The installer has been tested on Windows and checked against every package it downloads, but it has not yet been
-run all the way through on a Mac. Please tell me what happens: the setup log is in the `logs` folder.
+**This package is untested on a Mac.** The setup script has been tested on Windows and checked against every
+package it downloads, but neither it nor the app has yet been run all the way through on a Mac, and several things
+added since 2.3 have only ever run on Windows: reading videos on the graphics hardware, several videos at once, and
+the Basic screen. Please tell me what happens: the setup log is in the `logs` folder.
 
 ## What you need
 
@@ -63,7 +65,14 @@ Advanced settings shows what this Mac offers, and lets you force the processor.
 
 ## Differences from the Windows version
 
+- There is no installer for macOS: unzip the folder and double-click `Skydive Cutter.command`. Nothing is added to
+  Launchpad or the Applications folder.
 - The launchers are `Skydive Cutter.command` and `Repair.command` rather than `.cmd` files.
+- **Read videos with: Automatic** uses Apple's VideoToolbox to unpack video where the Windows version uses the
+  graphics card. If videos fail to read, set it to **Processor only** (Advanced settings > Processing).
+- **Videos at once: Automatic** cannot see how busy the Mac's GPU is, so it never runs more than two together.
+  Choose a number to run more.
+- The speed figures in the documentation were measured on Windows PCs with NVIDIA cards and say nothing about a Mac.
 - "Show in folder" opens Finder with the clip selected; "Open in my video player" uses whatever you have set.
 - Everything else, including the Review tab and the clips, behaves the same.
 
@@ -73,7 +82,15 @@ Advanced settings shows what this Mac offers, and lets you force the processor.
 - [How it works](docs/HOW_IT_WORKS.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md) · [Changelog](CHANGELOG.md)
 
-Where those mention `Skydive Cutter.cmd` or `Repair.cmd`, read `Skydive Cutter.command` and `Repair.command`.
+They are shared with the Windows version, so they mention Explorer (read Finder), NVIDIA graphics cards (read the
+Mac's own GPU) and, in the list of what was tested, the Windows installer.
+
+## Using it
+
+The app opens on the **Basic** screen: choose the folder with your videos and a folder for the clips, tick **Trim my
+footage**, **A grade**, **B grade** or any mix, and click **Process videos**. Each choice gets its own folder, and
+clips are named after the video they came from. The **Advanced** button shows every profile and setting, each with a
+**?** that explains it. The [user guide](docs/USER_GUIDE.md) has the rest.
 
 ## What is downloaded, and from where
 
