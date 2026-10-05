@@ -4,9 +4,16 @@ Skydive Cutter itself (its code and trained model files) is licensed under the G
 see [LICENSE](LICENSE). The components below are not part of that licence grant: each keeps its own licence.
 
 The Skydive Cutter download contains only Skydive Cutter's own code, its trained model files, the installer and the
-documentation. Everything below is **downloaded by setup (the first run of `Skydive Cutter.cmd`) directly from its
-official source onto your PC** and stays under its own licence. Each package's licence file is installed alongside it
+documentation. Everything below is **downloaded by setup (run by the installer, or by the first run of
+`Skydive Cutter.cmd`) directly from its official source onto your PC** and stays under its own licence. Each package's licence file is installed alongside it
 in `.runtime\<profile>\Lib\site-packages\<package>.dist-info`; FFmpeg's is copied to `third_party\ffmpeg`.
+
+## The Windows installer
+
+`Skydive-Cutter-<version>-Setup.exe` is made with [Inno Setup](https://jrsoftware.org/isinfo.php), copyright
+(C) 1997-2026 Jordan Russell and Martijn Laan, and contains Inno Setup's setup and uninstall programs. Inno Setup is
+used under its own licence (https://jrsoftware.org/files/is/license.txt), which permits this. The ZIP contains none
+of it.
 
 ## Model weights
 
@@ -39,5 +46,8 @@ audio and motion models were trained from scratch on that footage. No third-part
 | --- | --- | --- |
 | Ultralytics YOLO 8.4.67 and its dependencies | pypi.org | **AGPL-3.0** |
 | yolo11n.pt weights | github.com/ultralytics/assets | AGPL-3.0 |
+
+Larger detector files (such as `yolo26x.pt`) are not downloaded by setup. If you add one yourself from Ultralytics'
+release page, it is under the same AGPL-3.0 licence.
 
 The add-on is kept out of the main download for licensing reasons; installing it is your choice.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.6.0 (October 2026)
+
+- **An installer.** `Skydive-Cutter-2.6.0-Setup.exe` installs the app for you alone (no administrator rights), adds
+  it to the Start menu, runs the one-time download of Python, the AI libraries and FFmpeg, and lists the app under
+  Windows' installed apps so it can be upgraded and uninstalled the usual way. Uninstalling removes everything the
+  app downloaded and asks before removing your settings. The installer is not code-signed, so Windows shows its
+  "unknown publisher" warning. The ZIP is still published and works as before.
+- **The app has an icon**, in the window, the taskbar and the Start menu.
+- **Started from the Start menu, no console window appears.** If something needs installing, the usual window you
+  can watch opens instead.
+- Upgrading or uninstalling while the app is open now asks you to close it first.
+- **The documentation is brought up to date** with the Basic screen, the folder per profile, several videos at
+  once, the person detector choice and the installer. Troubleshooting has new sections on the installer, on slow
+  processing and on finding out why a video gave no clips.
+
+No change to results: nothing is reprocessed.
+
 ## 2.5.1 (October 2026)
 
 Fixes from a review of 2.5.0. No change to results.

@@ -149,7 +149,8 @@ class Machine:
                     return None
                 return status.available / 2 ** 30
             if sys.platform == 'darwin':
-                output = subprocess.run(['vm_stat'], capture_output=True, text=True, timeout=5).stdout
+                output = subprocess.run(['vm_stat'], capture_output=True, text=True, timeout=5,
+                                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
                 page = int(output.split('page size of')[1].split()[0])
                 pages = {line.split(':')[0]: int(line.split(':')[1].strip().rstrip('.'))
                          for line in output.splitlines()[1:] if ':' in line}

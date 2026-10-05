@@ -3,6 +3,7 @@ param(
     [ValidateSet('Auto','CPU','NVIDIA')][string]$Mode = 'Auto',
     [switch]$Repair,        # install everything again over the top; Skydive Cutter must be closed
     [switch]$PauseAtEnd,    # keep the window open at the end (the app starts setup this way)
+    [switch]$PauseOnFailure, # keep it open only if setup stopped (the installer starts setup this way)
     [switch]$AllowOneDrive  # install inside a OneDrive folder anyway
 )
 $ErrorActionPreference = 'Stop'
@@ -255,7 +256,7 @@ try {
 } finally {
     if ($setupLock) { $setupLock.Dispose() }
     Stop-Transcript | Out-Null
-    if ($PauseAtEnd) {
+    if ($PauseAtEnd -or ($PauseOnFailure -and $setupFailed)) {
         Write-Host ''
         Read-Host $(if ($setupFailed) { 'Press Enter to close this window' } else { 'Done. Press Enter to close this window' }) | Out-Null
     }

@@ -50,16 +50,40 @@ Clips/
 ```
 
 Videos at the top of the input folder go straight into `exit_freefall/`. The subfolders are taken relative to the
-**Input videos** folder at the time the video is processed.
+**Videos to process** folder at the time the video is processed.
 
-Another video uses its own name and ID. Another profile gets its own folder or, in the flat layout, its own filename component. The flat layout still contains `_manifests` and `_state` supporting folders, omitted above for clarity.
+**A folder per profile, clips named after the video**
+
+The Basic screen always uses this one. Each profile has a folder named after it, and clips carry the video's own
+file name, the profile and, when one video gives several clips, a number:
+
+```text
+Clips/
+  Exit + Freefall/
+    GOPR0001 - Exit + Freefall 1.mp4
+    GOPR0001 - Exit + Freefall 2.mp4
+  A grade/
+    GOPR0001 - A grade.mp4
+    GOPR0001 - A grade canopy.mp4
+```
+
+- A profile's **Folder for this profile's clips** changes where its clips go: a name gives another folder inside
+  Clips, and a full path puts them anywhere. Two profiles can share a folder; that is how `A grade canopy` lands in
+  `A grade` and `Trimmed landing` in `Trimmed`.
+- If two different videos have the same file name (two cards each with a `GOPR0001.MP4`), the first one processed
+  keeps the plain name and the other's clips carry the first six characters of its ID:
+  `GOPR0001 [1a2b3c] - A grade.mp4`. The choice is recorded in `_state/clip_names.json`, so names never change
+  between runs.
+- These names carry no times or phase. The manifest has them.
+
+Another video uses its own name and ID. Another profile gets its own folder or, in the flat layout, its own filename component. Every layout also has `_manifests` and `_state` supporting folders in the Clips folder, omitted above for clarity.
 
 A clip of a 360 video keeps that video's own extension (`clip_001_000042s-000067s_freefall.360`) and every lens
 track, so it still opens in the camera maker's player.
 
 ## Filenames
 
-A video's output name is its sanitized original filename without the extension, followed by an underscore and a 16-character ID. Very long stems are shortened and Windows-invalid characters are replaced. The ID incorporates the source path and a checksum of the entire file. Full identity records are checked before a shortened ID is reused.
+Timelines, manifests and every layout except **A folder per profile** use the video's output name. A video's output name is its sanitized original filename without the extension, followed by an underscore and a 16-character ID. Very long stems are shortened and Windows-invalid characters are replaced. The ID incorporates the source path and a checksum of the entire file. Full identity records are checked before a shortened ID is reused.
 
 | Clip filename part | Meaning |
 | --- | --- |
@@ -104,11 +128,11 @@ Probabilities are model scores, not guarantees of accuracy. Person measurements 
 
 ### Sample timing and matches
 
-Sampling starts at **0.5 seconds**. With people detection on, spacing is `1 / Samples per second`; the default produces 0.5, 1.5, 2.5 seconds, and so on. With people detection off, spacing is one second. Only timestamps strictly before the end are included. A very short video can produce a header-only CSV when phase identification is disabled.
+Sampling starts at **0.5 seconds**. With people detection on, spacing is `1 / Checks per second`; the default produces 0.5, 1.5, 2.5 seconds, and so on. With people detection off, spacing is one second. Only timestamps strictly before the end are included. A very short video can produce a header-only CSV when phase identification is disabled.
 
 A sample exactly on a phase boundary belongs to the interval starting there. This is sampled data, not a per-frame export. Increasing people sampling frequency does not itself increase the phase classifier's resolution.
 
-`matched_profiles` records direct tests at each sample. Margins and gap filling do not add matches, and minimum span does not remove matches from the CSV. Therefore matches can exist even when no clips survive the minimum-span rule.
+`matched_profiles` records direct tests at each sample. Extra footage and joined gaps do not add matches, and **Ignore matches shorter than** does not remove matches from the CSV. Therefore matches can exist even when no clips survive that rule. The Review tab's **Why not kept** row shows the outcome of every rule for each second.
 
 The app writes CSV results; it does not watch CSV edits or offer a GUI action to cut from an edited CSV. A later run can overwrite the timeline for the same source identity. Save a separate copy for manual analysis or annotations.
 
@@ -117,14 +141,15 @@ The app writes CSV results; it does not watch CSV edits or offer a GUI action to
 For each enabled profile, the app:
 
 1. Tests samples against the active phase and people filters.
-2. Bridges non-matching gaps surrounded by matches when their sampled duration is within **Bridge non-matching dips up to**.
-3. Groups matches into spans, starting at the first matching timestamp and ending one sample interval after the last matching timestamp.
-4. Drops spans shorter than **Minimum span**, before margins.
-5. Adds **Extra footage before** and **Extra footage after**.
-6. Merges padded spans that overlap or are separated by no more than **one second**.
-7. Limits intervals to the source duration and cuts them.
+2. Fills gaps between two matches that are no longer than **Join matches separated by up to**.
+3. If **Join gaps while people are still in view** is above 0, also fills longer gaps between two matches, up to that length, while at least **People still in view means at least** people are found in every sample of the gap, however little of the picture they fill. A stretch inside the gap without them is allowed if it is no longer than the ordinary join in step 2. This never extends a clip at its ends.
+4. Groups matches into spans, starting at the first matching timestamp and ending one sample interval after the last matching timestamp.
+5. Drops spans shorter than **Ignore matches shorter than**, before the extra footage is added.
+6. Adds **Start each clip earlier by** and **End each clip later by**.
+7. Merges padded spans that overlap or are separated by no more than **one second**.
+8. Limits intervals to the source duration and cuts them.
 
-At one sample per second, matches at 10.5, 11.5, and 12.5 seconds form a requested 10.5–13.5-second span. A four-second minimum rejects it before margins. With a three-second minimum, 1 s before and 2 s after request 9.5–15.5 seconds, provided that lies within the source.
+At one check per second, matches at 10.5, 11.5, and 12.5 seconds form a requested 10.5–13.5-second span. A four-second minimum rejects it before the extra footage. With a three-second minimum, 1 s before and 2 s after request 9.5–15.5 seconds, provided that lies within the source.
 
 The cutter stream-copies the first video stream and the first audio stream, if present. It does not export every stream, transcode codecs, or concatenate sources. Keyframe alignment can add footage before the requested start and change playable duration. Some source codecs cannot be copied successfully into MP4.
 
@@ -136,7 +161,7 @@ Each enabled profile has one manifest per processed source, even when no clips m
 Clips/_manifests/<layout>/<profile>/<video name>_<ID>.clips.csv
 ```
 
-The layout folder is `per_video`, `per_clip`, or `flat`.
+The layout folder is `per_video`, `per_clip`, `flat`, `mirror` or `by_profile`. Manifests are always in the Clips folder, including for a profile whose clips go to a folder of its own elsewhere.
 
 | Column | Meaning |
 | --- | --- |
@@ -150,7 +175,7 @@ The layout folder is `per_video`, `per_clip`, or `flat`.
 | `dominant_phase` | Most common sampled phase within the requested interval; `all` with phase identification off. |
 | `source_id` | Full identity used for output ownership. |
 | `source_sha256` | Source content SHA-256 checksum. |
-| `output_layout` | `per_video`, `per_clip`, or `flat`. |
+| `output_layout` | `per_video`, `per_clip`, `flat`, `mirror` or `by_profile`. |
 
 Manifests let the app recognize its previous clips during replacement. Preserve them with the outputs; editing them does not provide a supported way to change cut decisions.
 
@@ -162,10 +187,15 @@ Manifests let the app recognize its previous clips during replacement. Preserve 
 | `<active destination>/_state/classifier-runs/<video>_<time>/result.json` | Every track for one video: Final, V4 video, audio, motion model, the motion trace and events, the agreement strip, and warnings. `engine.log` beside it holds diagnostics. |
 | `<active destination>/_state/review/` | The Review tab's folder: `review.csv` (your labels), `review_state.json` (what you marked reviewed, with a copy of those labels), `review_exclusions.json` (videos marked not skydiving). |
 | `<active destination>/_state/thumbnails/<video>_<ID>/` | One still per clip (`<profile>_<clip number>.jpg`), shown in the Results list. |
+| `<Clips>/_state/clip_names.json` | Which video owns each plain clip name in the folder-per-profile layout. |
 | `<CSV files>/_state/sources/` | Full identity records protecting CSV names. |
 | `<Clips>/_state/sources/` | Full identity records for clip outputs when cutting. |
 | `<application folder>/app/settings.json` | Saved GUI choices and internal settings. |
 | `<application folder>/app/speed.json` | How fast this PC processes video, for the time estimate. Safe to delete. |
 | `<application folder>/logs/` | Setup logs, the install check, and the app's startup logs. |
+
+The application folder is where the app is installed: `%LOCALAPPDATA%\Programs\Skydive Cutter` with the installer
+unless you chose another, or the folder you extracted the ZIP into. The ledger also records how long each step took
+for each video and the people already counted, which is why changing a profile does not read the video again.
 
 Old classifier-run directories are not automatically removed, and layouts are not automatically consolidated. Earlier source identities and removed profiles retain their outputs. Within an active profile and layout, a successful replacement can remove stale clips owned by its previous manifest. Archive files after processing stops, retaining supporting records with results you want the app to recognize.

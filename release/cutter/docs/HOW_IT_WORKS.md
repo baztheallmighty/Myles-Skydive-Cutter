@@ -20,7 +20,9 @@ The classifier never lets the phases go backwards. It finds the most likely sequ
 ### 1. Video (the main model)
 
 - The video is converted once into a small working copy: 12 frames per second, fitted into 160 × 160 pixels. For
-  360° footage the front view is used. The copy is deleted afterwards.
+  360° footage the front view is used. The copy is deleted afterwards. The same single read of the video also
+  supplies the frames the people are counted on, and the graphics card does the unpacking when it can, dropping the
+  frames nobody needs before they are copied back. The working copy is identical whichever does the reading.
 - A 3D convolutional network (R3D-18, started from the public Kinetics-400 action-recognition weights) looks at
   **2-second windows, one per second**, and describes each window.
 - A **temporal network** reads the whole sequence of window descriptions and decides the phase of each second in the
@@ -50,6 +52,27 @@ cameras. Skydive Cutter reads it from the file's metadata without decoding any v
   of context either side). It never sees the video.
 
 Cameras without motion data simply don't have these tracks.
+
+## People
+
+Once a second (more often if you raise **Checks per second**) a person detector looks at one frame and reports each
+person it finds as a rectangle. From those come the two numbers a profile can ask for: how many people, and how much
+of the picture their rectangles fill. The detector is a general one, not trained on skydiving, so it misses people who
+are far away or seen from behind; larger versions of it miss fewer. It counts whoever it sees, including the camera
+wearer's own limbs. People never change the phases: they only decide which seconds of a phase a profile keeps.
+
+## From phases and people to clips
+
+Each profile tests every second against its parts of the jump and its people numbers, joins matches separated by short
+gaps, drops matches that are too short, and adds the extra footage at each end. The exact order is in the
+[Output and CSV reference](OUTPUT_REFERENCE.md#how-matching-becomes-clips), and the Review tab's **Why not kept** row
+shows the outcome second by second. Trim my footage, A grade and B grade are profiles like any other.
+
+## Doing several videos at once
+
+Each video is independent, so several can be in progress together. The work for one video also overlaps itself: the
+classifier loads and analyses the sound while the picture is still being read. However many run side by side, every
+video's result is the same as when it runs alone; this was checked on 24 videos by comparing every timeline.
 
 ## How the final answer is made
 

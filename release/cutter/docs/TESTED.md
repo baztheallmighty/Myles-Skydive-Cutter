@@ -1,6 +1,44 @@
 # What this release was tested on
 
-Skydive Cutter 2.3.0, September 2026.
+Skydive Cutter 2.6.0, October 2026. The first two sections are what was tested for 2.5 and 2.6. The sections after
+them were measured on 2.3.0 and have not been repeated since, except where they say so.
+
+## The installer (2.6.0)
+
+On Windows 10 Pro 22H2 with an NVIDIA RTX 5090, a test build of the installer (the same files under a separate name)
+was installed without anyone at the keyboard into a folder with a space in its name, and passed 25 checks:
+
+- all 79 package files installed and matching their checksums;
+- the Start menu shortcut present, pointing at the install folder, using the app's icon and opening no console window;
+- the app listed under Windows' installed apps with the right version, for the current user only;
+- setup downloaded and installed Python, the libraries, FFmpeg and the person detector in under 5 minutes and passed
+  every install check;
+- the app opened from the Start menu shortcut, stayed open, and could be seen by an installer as running;
+- uninstalling removed the app, the shortcut, the entry under installed apps and everything setup downloaded, and
+  left only the settings file.
+
+**Not tested yet:** clicking through the installer's pages by hand, installing a newer version over an older one,
+installing on a PC without an NVIDIA card, and Windows 11.
+
+## Speed, and the same results (2.5)
+
+24 jump videos, 62 minutes of footage, mostly 4K at 60 frames a second from GoPro and 2.7K from DJI, with all three
+Basic choices ticked:
+
+| PC | 2.4.3 | 2.5, one video at a time | 2.5, several at once |
+| --- | ---: | ---: | ---: |
+| Ryzen 9 5950X, RTX 5090 | 15.3 min | 7.6 min | 3.5 min (four at once; no gain beyond) |
+| GTX 1060 | 38.4 min | 25.7 min | 17.2 min (two at once) |
+
+With **Trim my footage** alone: 7.6 and 3.6 minutes on the RTX 5090, 23.8 and 16.9 on the GTX 1060. Every timeline
+from every run was identical to the one made by 2.4.3 one video at a time.
+
+The automated tests (443, run on Windows 10) cover the settings, profiles and joins, clip naming and name clashes,
+the Basic and Advanced screens, several videos at once, reading on the graphics card and falling back, the help
+notes, the Results list, and the installer script.
+
+**Not tested yet:** the **Automatic** setting for Videos at once on PCs other than these two; its limits are first
+guesses. The larger person detectors were compared on two videos only.
 
 ## Machines and installs
 
@@ -17,7 +55,7 @@ Visual C++ runtime. Please report problems with the details listed in
 
 ## What a new machine gets
 
-On a PC that had never run the app, extracting the ZIP and double-clicking the launcher installed everything
+Measured on 2.3.0. On a PC that had never run the app, extracting the ZIP and double-clicking the launcher installed everything
 (Python, the libraries, FFmpeg and the person detector) in 10 min 45 s, mostly download time. After that, starting
 the app checks the install in 0.4 s. Removing the detector's model file afterwards was reported by name and stopped
 processing rather than being ignored, and putting it back cleared the problem.
@@ -30,7 +68,8 @@ advanced sections builds; the app's own health check reports nothing missing; FF
 
 ## End-to-end test
 
-Three videos processed exactly as the app does, with clips cut:
+Measured on 2.3.0; processing has roughly doubled in speed since (see above). Three videos processed exactly as the
+app does, with clips cut:
 
 | Video | Camera | Motion data | Processing time (RTX 5090) | Agreement with hand labels |
 | --- | --- | --- | ---: | ---: |
@@ -80,7 +119,8 @@ ordinary audio and the telemetry, and stay `.360` files.
 
 ## Interface test (67 checks)
 
-The real window is driven automatically on the three videos:
+Last run in full on 2.3.0, before the Basic screen existed; what it lists is still in the app, on the Advanced
+screen. The real window is driven automatically on the three videos:
 
 - **Tabs and layout:** Process and Review tabs; one Process videos button with Keep watching; two columns, with the
   settings column scrolling on its own beside the results; the three advanced sections folding, opening and being
@@ -108,4 +148,5 @@ The real window is driven automatically on the three videos:
 - **Presets:** the menu lists all presets, including Group freefall; a preset opens in the editor.
 
 The release build scans every file for private paths and names, and checks every file's checksum inside the ZIP.
+The installer is built from the same list of files and stops on the same checks.
 Screenshots in the documentation show blurred footage and made-up folder names.

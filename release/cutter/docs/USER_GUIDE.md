@@ -12,6 +12,7 @@ Also see the [Output and CSV reference](OUTPUT_REFERENCE.md), [How it works](HOW
 ## Contents
 
 - [First run](#first-run)
+- [Basic and Advanced](#basic-and-advanced)
 - [The Process tab](#the-process-tab)
 - [Keep profiles](#keep-profiles)
 - [Processing videos](#processing-videos)
@@ -19,15 +20,19 @@ Also see the [Output and CSV reference](OUTPUT_REFERENCE.md), [How it works](HOW
 - [The Review tab](#the-review-tab)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Advanced settings](#advanced-settings)
+- [360 footage](#360-footage)
+- [When something is missing](#when-something-is-missing)
 - [Reprocessing and keeping results](#reprocessing-and-keeping-results)
 
 ## First run
 
-1. Double-click **`Skydive Cutter.cmd`**. The first run installs what the app needs (see the
-   [README](../README.md#install)); later runs check in a second and open straight away.
+1. Start **Skydive Cutter** from the Start menu if you used the installer, or double-click
+   **`Skydive Cutter.cmd`** in the folder if you extracted the ZIP. The first run installs what the app needs (see
+   the [README](../README.md#install)); later runs check in a second and open straight away.
 2. Choose **Videos to process** (folders inside it are included) and **Save clips to**. You can also drag a folder
    from Explorer onto either box.
-3. Leave **Exit + Freefall** ticked, or add profiles (**Add a ready-made profile** has several).
+3. Tick what to keep: **Trim my footage**, **A grade**, **B grade**, or any mix (see
+   [Basic and Advanced](#basic-and-advanced)).
 4. Click **Process videos**.
 5. When videos appear in **Results**, double-click one, or open the **Review** tab, to see what was cut.
 
@@ -78,6 +83,10 @@ You can process `Card A/GOPR0001.MP4` and `Card B/GOPR0001.MP4` together. Output
 with a 16-character ID, for example `GOPR0001_1a2b3c4d5e6f7890`. The ID comes from the file's location and contents,
 so different footage with the same name never collides. You don't need to rename anything.
 
+With **A folder per profile** (which the Basic screen always uses) clips carry the plain file name instead, such as
+`GOPR0001 - A grade.mp4`. The first `GOPR0001` processed keeps the plain name; the other one's clips are named
+`GOPR0001 [1a2b3c] - A grade.mp4`. Which is which is remembered, so the names stay the same on every later run.
+
 ## Keep profiles
 
 Each profile selects footage independently. A moment must pass all of a profile's filters. If you select several
@@ -125,16 +134,19 @@ checks, five seconds apart), so a copy in progress is left alone.
 
 Recognised extensions: `.mp4`, `.mov`, `.avi`, `.mkv`, `.mts`, `.m2ts`, `.wmv`, `.mpg`, `.mpeg`, `.360`, in any
 letter case.
-Videos are processed one at a time, and the settings are locked during a run. You can keep reviewing on the Review tab
-while videos are processed; new ones appear there as they finish.
+Videos are processed one at a time unless you raise **Videos at once** (Advanced settings > Processing). The settings
+are locked during a run. You can keep reviewing on the Review tab while videos are processed; new ones appear there as
+they finish.
 
 - **Queue progress** counts finished videos, with failures listed separately. After the first video it also shows an
   estimate such as *about 6 min left*. The estimate comes from how fast this PC has processed video so far, so it
   improves with use.
-- **Current video** shows the file and its step: checking, identifying phases (video, sound, motion), counting
-  people, writing the CSV, creating clips.
-- **Stop** finishes the current video and stops. Press it again (**Cancel current video...**) to stop that video too.
-  Finished outputs are kept, and a cancelled video is processed again next time.
+- **Current video** shows the file and its step: checking, reading the video and counting people, working out the
+  parts of the jump (video, sound, motion), writing the CSV, creating clips. With several videos at once there is
+  one bar for each.
+- **Stop** finishes the videos in progress and stops. Press it again (**Cancel current video...** or **Cancel videos
+  in progress...**) to stop those too. Finished outputs are kept, and a cancelled video is processed again next time.
+- When a video finishes, the log says how long each step took.
 
 ## The Results list
 
@@ -148,11 +160,15 @@ One row per processed video in the current Clips folder:
 | **Clips** | How many clips were cut. |
 | **Needs a look** | How many stretches the motion data (or sound) disagreed with the result, and the share of the video that disagreed. |
 | **Notes** | Warnings such as *No usable audio*. |
+| **Processed** | When the video was last processed. |
 
 **Show** filters the list: all videos, those that need a look, failed ones, those cut from your labels, or those not
-reviewed yet. Double-click a row, or use **Open in Review**, to review that video. **Show clips** opens the folder with
-its clips, **Open timeline CSV** opens its CSV, and **Process this video again** runs it again from scratch (useful
-after a failure).
+reviewed yet. Click a column title to sort by it, and again to reverse; drag the edge of a title to change a column's
+width.
+
+Double-click a row, or use **Open in Review**, to review that video. **Show clips** opens the folder with its clips,
+**Open timeline CSV** opens its CSV, and **Process again** runs it again from scratch (useful after a failure). To
+process several again together, select them first: Ctrl+click, Shift+click, or Ctrl+A for all.
 
 ## The Review tab
 
@@ -235,7 +251,7 @@ you left open.
 | Setting | Meaning |
 | --- | --- |
 | **What to produce** | **Clips and timelines**, or **Timelines only - no clips** (timelines and profile matches only). |
-| **Organise clips** | **A folder per video**, **A folder per clip, grouped by video**, **All clips in one folder**, or **Same folders as the input videos** (keeps your input folder structure, for example `2024/Boogie/`). An example path is shown below it; see the [folder examples](OUTPUT_REFERENCE.md#folder-examples). |
+| **Organise clips** | **A folder per video**, **A folder per clip, grouped by video**, **All clips in one folder**, **Same folders as the input videos** (keeps your input folder structure, for example `2024/Boogie/`), or **A folder per profile, clips named after the video** (what the Basic screen uses; each profile can also be given a folder of its own). An example path is shown below it; see the [folder examples](OUTPUT_REFERENCE.md#folder-examples). |
 | **Save timelines to** | **In the clips folder** (a `timelines` folder inside it, the default), or **Somewhere else**: choose any folder with **Browse...** or drag one onto the box. With timelines only there is no clips folder, so a folder is required. |
 
 **Processing**
@@ -244,7 +260,7 @@ you left open.
 | --- | --- |
 | **Work out the parts of each jump** | Turn it off to cut by people only. |
 | **Run on** | **Automatic** (NVIDIA GPU if available), **NVIDIA GPU**, or **Processor only**. |
-| **Videos at once** | **1** (the default), **2**, **3**, **4** or **Automatic**. More is faster when the machine has spare processor cores and graphics memory. Automatic starts with one and adds another only while the processor, memory and graphics card have room; it never stops a video that is running. Each video in progress gets its own progress bar. The results are the same however many run together. |
+| **Videos at once** | **1** (the default) up to **10**, or **Automatic**. More is faster when the machine has spare processor cores and graphics memory, up to a point: on the test PCs an RTX 5090 gained nothing beyond four, and a GTX 1060 was best at two. Automatic starts with one and adds another only while the processor, memory and graphics card have room; it never stops a video that is running. Each video in progress gets its own progress bar. The results are the same however many run together. |
 | **Read videos with** | **Automatic** unpacks each video on the graphics card when that works for the file, and on the processor otherwise. The picture is identical either way. **Processor only** is there in case of a graphics driver problem. |
 | **Graphics memory use (batch size)** | Video windows per GPU batch. Lower it if a small graphics card runs out of memory. |
 | **360 camera footage** | Which side of a 360 camera to use: **Front view only** (the default), **Front view, people counted all round**, or **Back view only**. Ordinary cameras ignore it. See [360 footage](#360-footage). |
@@ -261,6 +277,9 @@ you left open.
 
 Person area uses rectangular boxes. Total area adds the boxes, so overlaps can exceed 100%. Click the **?** beside
 any setting for more detail.
+
+The mouse wheel scrolls the settings without changing them. To change a drop-down or a number with the wheel, click
+it first.
 
 Each video's picture is read once: the same read counts the people and makes the small copy the phase model looks at.
 When a video finishes, the log says how long each step took.
@@ -313,7 +332,7 @@ A video is processed again when the file is new or has changed, when you change 
 as profile changes or reviews, **reuse the phases from the last run** instead of running the model again. Processing
 again is therefore quick.
 
-Where things are does not count. Unzipping a new version of the app beside the old one, moving the Clips folder, a
+Where things are does not count. Installing a new version over the old one, unzipping one beside it, moving the Clips folder, a
 drive coming back as another letter, or renaming the folders your videos are in reprocesses nothing: a video with the
 same name and content is recognised in its new place and keeps its phases, reviews and clip names. A file whose time
 moved by whole hours (a FAT32 card read after the clocks changed, or in another time zone) also counts as unchanged.

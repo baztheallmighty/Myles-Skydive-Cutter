@@ -4,7 +4,8 @@ param(
     [ValidateSet('Auto', 'CPU', 'NVIDIA')][string]$Mode = 'Auto',
     [switch]$Repair,
     [switch]$SkipCheck,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [switch]$Quiet   # started from a shortcut with no window: if anything needs installing, do that in one you can see
 )
 # The only thing you run. It checks what this folder has, installs anything missing, then opens the app.
 $ErrorActionPreference = 'Stop'
@@ -60,6 +61,11 @@ if ($CheckOnly) {
     Write-Host 'Missing:'
     foreach ($item in $missing) { Write-Host "  - $item" }
     exit 1
+}
+if ($Quiet -and $missing.Count -gt 0) {
+    # A hidden window would download gigabytes with nothing on screen. Hand over to the ordinary launcher instead.
+    Start-Process -FilePath (Join-Path $root 'Skydive Cutter.cmd') -WorkingDirectory $root
+    exit 0
 }
 if ($Repair -or $missing.Count -gt 0) {
     if ($missing.Count -gt 0 -and -not $Repair) {

@@ -2,6 +2,26 @@
 
 [User guide](USER_GUIDE.md) · [Output and CSV reference](OUTPUT_REFERENCE.md) · [How it works](HOW_IT_WORKS.md)
 
+## The installer
+
+- **"Windows protected your PC" (SmartScreen)**: the installer is not code-signed, because this free project does not
+  buy a certificate. Choose **More info**, then **Run anyway**. The download's SHA-256 checksum is published beside
+  it if you want to check the file first.
+- **"Setup has detected that Skydive Cutter is currently running"**: close the app window, then choose Retry. The
+  same message appears when uninstalling.
+- **The download window closed early, or the PC was switched off during it**: start Skydive Cutter from the Start
+  menu. It lists what is missing in red and **Install now** continues from the files already downloaded.
+- **The download window stopped with a red message**: it stays open so you can read it. The causes are the ones
+  under [Setup fails](#setup-fails) below. After fixing the cause, start the app and click **Install now**, or run
+  `Repair.cmd` in the install folder.
+- **Where it is installed**: `%LOCALAPPDATA%\Programs\Skydive Cutter` unless you chose another folder. Paste that
+  into Explorer's address bar to open it; `Repair.cmd` and the `logs` folder are there.
+- **Uninstalling**: Windows **Settings > Apps**, find Skydive Cutter, **Uninstall**. It removes the app and what it
+  downloaded, and asks about your settings. Clips, timelines and your videos are never removed. Then delete the
+  folder if you no longer want the settings file left in it.
+- **Upgrading**: run the newer installer. It replaces the app and keeps your settings and everything already
+  downloaded; nothing is processed again because of the upgrade.
+
 ## Setup fails
 
 - **"Please free at least N GB"**: the NVIDIA setup needs about 20 GB free on the drive holding the folder, the
@@ -31,8 +51,10 @@ if you prefer.
 
 ## The app will not open
 
-Run `Skydive Cutter.cmd` from the complete, extracted folder. It installs anything missing before it opens the app, so
-a first run can take a while; leave the window open.
+With the installer, start it from the Start menu. Nothing appears for a few seconds while the install is checked,
+then the window opens; if something is missing, a setup window you can watch opens instead. From the ZIP, run
+`Skydive Cutter.cmd` from the complete, extracted folder. Either way it installs anything missing before it opens
+the app, so a first run can take a while; leave the window open.
 
 If nothing appears, look at the newest `logs\app-<date>.stderr.log`. Avoid starting extra copies while diagnosing the
 first one.
@@ -51,7 +73,7 @@ first one.
 The Results list shows *(re-cut pending)* until it is. The re-cut starts when you click **Mark reviewed and re-cut**
 (or **Not skydiving**), unless **Re-cut a video as soon as you mark it reviewed** is off under Advanced settings; then
 it happens the next time you click **Process videos**. If processing is already running, the video is re-cut next, after
-the current one. Editing a reviewed video's labels does not change its clips until you mark it reviewed again.
+the ones in progress. Editing a reviewed video's labels does not change its clips until you mark it reviewed again.
 
 ## There is no time estimate
 
@@ -62,50 +84,98 @@ towards it.
 ## "People detection is not installed" in red
 
 The detector or its model file is missing, so the app will not process with people filters in your profiles. Click
-**Install now** in the banner, or run `Repair.cmd`. If you would rather cut on phases alone, open Advanced settings >
-What to keep and set every profile's people and area to 0.
+**Install now** in the banner, or run `Repair.cmd`. If you would rather cut on phases alone, use **Trim my footage**
+on the Basic screen, which does not look for people, or on the Advanced screen set every profile's **People in view**
+and **People fill** to 0.
 
 ## It is watching, but nothing happens
 
-- Allow two unchanged file observations. The default interval between checks is five seconds.
-- Confirm the files are non-empty and have a [recognized extension](USER_GUIDE.md#running-a-batch-or-monitoring-a-folder).
-- Check the input contains original videos. Output directories are excluded from scanning.
-- Successful, unchanged videos with the same settings are skipped. **Process Existing Now** is not a force-reprocess button.
-- **Process Existing Now** includes only files present at the start. Use another batch or **Start Monitor** for later arrivals.
+- A video is processed once its size and date have stopped changing: two checks, five seconds apart.
+- Confirm the files are not empty and have a [recognised extension](USER_GUIDE.md#processing-videos).
+- Check the videos folder holds the original videos. Output folders are left out of the scan.
+- Finished, unchanged videos with the same settings are skipped. **Process videos** is not a force-reprocess button;
+  to run a video again from scratch, select it in Results and click **Process again**.
+- Without **Keep watching for new videos** ticked, only the videos present when you clicked are processed.
 
-For a separate regenerated set, choose a fresh Clips destination when cutting, or a fresh CSV destination in CSV-only mode. Choose a fresh CSV destination too when preserving earlier timelines matters.
+For a separate regenerated set, choose a new **Save clips to** folder (or a new timelines folder with timelines only).
 
 ## There is a CSV, but no clips
 
-Check **Create** first: **CSV only — no clips** intentionally creates none.
+Check **What to produce** first: **Timelines only - no clips** intentionally creates none.
 
-When cutting is enabled, enable at least one profile. With phase identification on, it needs a matching selected phase. People thresholds can exclude all samples, and **Minimum span** can reject short matches. Inspect `matched_profiles` and the profile manifest. A header-only manifest means that profile produced no clips.
+Otherwise open the video on the Review tab and look at the **Why not kept** row. It gives the reason for every second:
+another part of the jump, nobody found, too few people, people too small, or a match too short. The usual causes:
 
-The CSV is written before cutting. Failure or cancellation during cutting can leave a CSV without a complete clip set. Check the final status and log, correct the cause, and start another session to retry.
+- **Nobody was found.** Distant jumpers and people seen from behind are the detector's weak spot. Try a larger
+  **Person detector**, or lower **People fill at least**.
+- **People were found but are small in the picture.** One person at 3% does not pass a profile that asks for 20%.
+  B grade asks for 10%; Trim my footage asks for nobody.
+- **The matches are short and scattered.** Raise **Join matches separated by up to**, or use **Join gaps while people
+  are still in view**, or lower **Ignore matches shorter than**.
+- **No jump was found** in the video (a ground video, or one that starts under canopy).
+
+The CSV is written before cutting. Failure or cancellation during cutting can leave a CSV without a complete clip set.
+Check the Status column, correct the cause, and process again.
 
 ## Clips start early, overlap, or include unwanted moments
 
-Profile margins, bridging non-matching dips, and merging padded spans within one second can add context. Stream copying can also start at an earlier keyframe.
+**Start each clip earlier by**, **End each clip later by**, the two joins, and merging clips that end up within one
+second of each other can all add footage. Copying the video data without re-encoding can also start a clip at an
+earlier keyframe.
 
-Reduce margins or gap bridging if they add too much footage. Even with both zero, cutting is not frame-accurate. Separate profiles can intentionally produce overlapping clips. See [How matching becomes clips](OUTPUT_REFERENCE.md#how-matching-becomes-clips).
+Reduce the extra footage or the joins if they add too much. Even with all of them at zero, cutting is not
+frame-accurate. Separate profiles can produce overlapping clips on purpose: B grade contains everything A grade does.
+See [How matching becomes clips](OUTPUT_REFERENCE.md#how-matching-becomes-clips).
 
 ## People count or coverage looks wrong
 
-Small, obscured, blurred, or distant people can be missed. Raising **Person detection threshold** accepts fewer detections; lowering it can admit false detections. **Samples per second** changes inspection frequency, not the meaning of the count.
+The Review tab shows what was found: **People found** is the count each second and **Picture filled** the percentage,
+each with a dashed line at what the profile asks for.
 
-Coverage measures bounding rectangles, including background inside them. Total coverage sums rectangles with overlaps, so values above 100% are possible. Adjust profile thresholds to suit the footage. Model and detector scores are not guarantees of accuracy.
+- **Skydivers are missed**, especially far away, from behind, or head-down. The detector that comes with the app is
+  small and fast. Put a larger one (for example `yolo26x.pt`, from Ultralytics' release page) in the app folder and
+  choose it under Advanced settings > People > **Person detector**. On two test videos the largest found two or more
+  people in 93% of the seconds where the standard one managed 70%. It is slower, and finished videos have their
+  people counted again.
+- **The count is one too high** under canopy or on landing: your own legs or arms count as a person.
+- Raising **How sure it must be that it is a person** accepts fewer detections; lowering it finds more people and
+  more mistakes. **Checks per second** changes how often the video is looked at, not what the count means.
+
+Coverage measures rectangles round each person, background included, and adds them up, so overlapping people can
+exceed 100%. A larger detector barely changes the percentage; it mostly changes the count.
 
 ## Phase classification fails
 
-**Standard** requires at least two seconds and is intended for one jump per video. Confirm the source plays and copying has finished. Very unusual formats (for example raw 360 files straight from a dual-lens camera) may classify poorly; export a normal flat video first.
+The video must be at least two seconds long, and the model expects one jump per video. Confirm the original plays and
+that copying it has finished.
 
-The warning gives a diagnostic log location. Keep it if you need to ask for help. If only people-based selection is needed, stop the session, disable **Identify jump phases**, and start another run; phase filters will be ignored.
+The warning gives the location of a diagnostic log. Keep it if you need to ask for help. If you only need to select on
+people, turn off **Work out the parts of each jump** under Advanced settings > Processing and run again; the parts of
+the jump ticked in each profile are then ignored.
 
-"Out of memory" on a small graphics card: close other programs that use the GPU. If it keeps happening, run `Repair.cmd` with `-Mode CPU` to use the processor instead (slower but reliable). Errors about missing model files mean the folder is incomplete: extract the ZIP again and rerun setup.
+"Out of memory" on a small graphics card: set **Videos at once** to 1, close other programs that use the graphics
+card, and lower **Graphics memory use (batch size)**. If it keeps happening, run `Repair.cmd -Mode CPU` to use the
+processor instead (slower but reliable). Errors about missing model files mean the install is incomplete: run
+`Repair.cmd`, or install again.
+
+## Processing is slow, or the PC is unusable while it runs
+
+- **Videos at once** set too high slows everything down. Past the point where the graphics card is full, more videos
+  only wait on each other: on the test PCs an RTX 5090 was fastest at four and a GTX 1060 at two. **Automatic** adds
+  a video only while there is room.
+- Most of the time goes on reading the video, and 4K at 60 frames a second is eight times the work of 1080p at 30.
+  **Read videos with: Automatic** uses the graphics card for this when it can; check it has not been left on
+  Processor only.
+- **Trim my footage** on its own is the quickest choice, because it does not look for people.
+- A larger **Person detector** is slower.
+- The log shows how long each step took for every video, which says where the time goes on your PC.
 
 ## A video cannot be read or cut
 
-Open the original in a video player. A recognized extension does not guarantee supported or undamaged encoding. A people-sample error at a particular timestamp can indicate a frame the decoder cannot read.
+Open the original in a video player. A recognised extension does not guarantee supported or undamaged encoding. A
+people-counting error at a particular time can point to a frame that cannot be read. If videos fail to read only with
+**Read videos with** on Automatic, set it to **Processor only** and update the graphics driver; normally the app
+falls back to the processor by itself, even part-way through a video.
 
 Cutting copies source encoding into MP4. A video can classify successfully yet fail cutting if its encoding cannot be copied into that container. Keep the error and the source format details if you ask for help. The GUI has no transcoding setting.
 
@@ -138,11 +208,14 @@ A session-lock error can mean another instance is processing into that active de
 
 ## Progress is busy, decreases, or reaches 100% with failures
 
-A busy video bar means a stage has not reported a measurable total. Classification can take time between updates. Progress represents work, not time estimates.
+A moving bar with no percentage means that step has not reported how much work there is. Working out the parts of the
+jump can take a while between updates.
 
-Queue percentage can decrease when new files join. It reaches 100% when all attempts finish even if some fail or are cancelled; read the counts. Work left queued when stopping is shown as left for the next run.
+The queue percentage can go down when new files join. It reaches 100% when every video has been attempted, even if
+some failed or were cancelled; read the counts. Videos still queued when you stop are left for the next run.
 
-Click **Stop Monitor** to finish the current video, or click **Cancel current video…** afterward and confirm. Published outputs remain. See [Stopping, cancelling, and closing](USER_GUIDE.md#stopping-cancelling-and-closing).
+Click **Stop** to finish the videos in progress, or click it again (**Cancel current video...**) and confirm to stop
+those too. Clips already saved remain. See [Processing videos](USER_GUIDE.md#processing-videos).
 
 ## The labels look wrong for a video
 
@@ -150,6 +223,6 @@ Double-click it in **Results** to open it on the Review tab. **Check >** (C) jum
 
 ## Details to keep when asking for help
 
-Record the warning and nearby activity-log messages, mode and layout, enabled classifiers, profile settings, source duration and format, and whether other videos succeed. Include the diagnostic log identified by the warning when available. Startup errors are in the `logs` folder; classifier diagnostics are in the active destination's `_state/classifier-runs`.
+Record the app's version, the warning and nearby log messages, whether you were on Basic or Advanced, the profiles in use and their settings, how the clips are organised, **Videos at once**, the video's length and format, and whether other videos succeed. Include the diagnostic log identified by the warning when available. Startup errors are in the `logs` folder; classifier diagnostics are in the active destination's `_state/classifier-runs`.
 
 Logs and CSVs can contain source paths and filenames. Share only what is needed for the issue. Do not alter saved settings, completion records, or manifests while processing is active.

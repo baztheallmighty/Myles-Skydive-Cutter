@@ -1,0 +1,13 @@
+{
+  "note": "What building the Windows installer needs besides Python, pinned by checksum. release/build_installer.py --fetch-tools downloads it into build/tools and unpacks it there in portable mode: nothing is installed on the PC, added to the Start menu or written to the registry.",
+  "innosetup": {
+    "version": "7.1.0",
+    "urls": [
+      "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe"
+    ],
+    "filename": "innosetup-7.1.0-x64.exe",
+    "sha256": "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f",
+    "signer": "Pyrsys B.V.",
+    "note": "Inno Setup's own releases page (jrsoftware/issrc on GitHub). The file's Authenticode signature was valid when this was pinned on 5 October 2026."
+  }
+}
