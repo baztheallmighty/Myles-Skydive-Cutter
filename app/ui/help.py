@@ -38,6 +38,7 @@ class HelpNote(QFrame):
         super().hideEvent(event)
         if self.closed:
             self.closed()
+        self.deleteLater()   # a note is made for one showing; kept, every click would leave another behind
 
     def show_beside(self, button):
         self.adjustSize()
@@ -74,6 +75,7 @@ class HelpButton(QToolButton):
 
     def settle(self):
         """Back to plain once its note has gone: the note took the mouse, so the button never heard it leave."""
+        self.note = None
         self.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, False)
         self.clearFocus()
         self.update()

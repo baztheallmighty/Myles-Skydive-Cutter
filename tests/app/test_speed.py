@@ -85,44 +85,46 @@ class TestTheCompileCache:
         module, folder = engine
         folder.mkdir(parents=True)
         (folder / 'left_by_a_crash.nbi').write_bytes(b'damaged')
-        with module.compile_cache():
+        fills = []
+
+        def fill():
             assert not (folder / 'left_by_a_crash.nbi').exists(), 'untrusted contents are thrown away first'
             (folder / 'compiled.nbi').write_bytes(b'good')
+            fills.append(1)
+        module.prepare_compile_cache(fill)
         assert module.compile_cache_marker(folder).is_file()
-        with module.compile_cache():
-            pass
-        assert (folder / 'compiled.nbi').read_bytes() == b'good', 'once vouched for, it is only read'
+        module.prepare_compile_cache(fill)
+        assert len(fills) == 1 and (folder / 'compiled.nbi').read_bytes() == b'good', 'once vouched for, only read'
 
     def test_only_one_fills_it_while_the_others_wait(self, engine):
         module, folder = engine
-        inside, most, order = [0], [0], []
+        inside, most, fills = [0], [0], []
         guard = threading.Lock()
 
-        def analyse(name):
-            with module.compile_cache():
-                filling = not module.compile_cache_marker(folder).is_file()
-                with guard:
-                    inside[0] += filling
-                    most[0] = max(most[0], inside[0])
-                    order.append((name, filling))
-                time.sleep(.3 if filling else 0)
-                with guard:
-                    inside[0] -= filling
-        threads = [threading.Thread(target=analyse, args=(n,)) for n in range(4)]
+        def fill():
+            with guard:
+                inside[0] += 1
+                most[0] = max(most[0], inside[0])
+                fills.append(1)
+            time.sleep(.3)
+            with guard:
+                inside[0] -= 1
+        threads = [threading.Thread(target=module.prepare_compile_cache, args=(fill,)) for _ in range(4)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join(timeout=30)
-        assert most[0] == 1 and sum(filling for _name, filling in order) == 1, order
+        assert most[0] == 1 and len(fills) == 1
 
     def test_a_filling_that_fails_leaves_no_marker_and_frees_the_next(self, engine):
         module, folder = engine
+
+        def broken():
+            raise RuntimeError('the compiler fell over')
         with pytest.raises(RuntimeError):
-            with module.compile_cache():
-                raise RuntimeError('the sound could not be read')
+            module.prepare_compile_cache(broken)
         assert not module.compile_cache_marker(folder).is_file()
-        with module.compile_cache():
-            pass
+        module.prepare_compile_cache(lambda: None)
         assert module.compile_cache_marker(folder).is_file()
 
     def test_a_lock_left_by_a_dead_process_is_taken_over(self, engine, monkeypatch):
@@ -130,9 +132,25 @@ class TestTheCompileCache:
         lock = folder.with_name(folder.name + '.filling')
         lock.mkdir(parents=True)
         monkeypatch.setattr(module, 'CACHE_LOCK_STALE_SECONDS', 0)
-        with module.compile_cache():
-            pass
+        module.prepare_compile_cache(lambda: None)
         assert module.compile_cache_marker(folder).is_file() and not lock.exists()
+
+    def test_the_lock_is_not_held_while_a_videos_sound_is_analysed(self, engine, monkeypatch):
+        """Filling is a few seconds on noise. A long video's sound, analysed under the lock, would outlast the
+        stale-lock rule and let a second engine empty the cache under the first."""
+        module, folder = engine
+        lock = folder.with_name(folder.name + '.filling')
+        held = []
+        monkeypatch.setattr(module, 'prepare_compile_cache', lambda fill=None: None)
+        import cutter_v4.audio as audio
+
+        def features(source, ffmpeg, work, offset):
+            held.append(lock.exists())
+            raise RuntimeError('stop here')
+        monkeypatch.setattr(audio, 'audio_features', features)
+        media = {'audio_stream_count': 1, 'audio_offset_sec': 0.0, 'duration_sec': 10.0}
+        assert module.audio_track(Path('jump.mp4'), 'ffmpeg', folder, media, None) == ([], 'error')
+        assert held == [False]
 
 
 class TestWaitingForTheProxy:
@@ -297,3 +315,104 @@ class TestReusingThePeopleAlreadyCounted:
         path.write_text('\n'.join(lines[:-2]) + '\n', encoding='utf-8')   # two rows gone
         process(settings, source, runner, previous=entry)
         assert len(reads) == 2
+
+
+class TestReviewFindings:
+    """One test for each fault the code review found."""
+
+    def test_the_classifier_failing_stops_the_read_and_leaves_no_proxy(self, folders, make_video, runner, monkeypatch,
+                                                                       tmp_path):
+        import shutil
+        from app.classifiers import CLASSIFIERS, Classifier
+        from app.people import PeopleSampler, ReadAbandoned
+        from conftest import process
+        folder = tmp_path / 'run'
+        looks = []
+
+        def prepare(source, settings):
+            folder.mkdir(exist_ok=True)
+            return folder
+
+        def predict(source, settings, runner, prepared=None):
+            raise RuntimeError('out of graphics memory')
+        CLASSIFIERS['falls_over'] = Classifier('falls_over', 'Falls over', 'test-1', predict, 0.0, prepare=prepare)
+
+        def sample(self, source, duration, settings, runner, media=None, proxy=None):
+            for look in range(200):   # a long read, a frame at a time
+                looks.append(look)
+                if self.give_up is not None and self.give_up():
+                    raise ReadAbandoned()
+                time.sleep(.01)
+            Path(proxy).write_bytes(b'proxy')
+            return []
+        monkeypatch.setattr(PeopleSampler, 'sample', sample)
+        inputs, clips = folders
+        shutil.move(make_video('jump.mp4'), inputs / 'jump.mp4')
+        from app.settings import KeepProfile, Settings
+        settings = Settings(input_folder=str(inputs), output_folder=str(clips), csv_folder=str(clips / 'timelines'),
+                            phase_classifier='falls_over', profiles=(KeepProfile(),))
+        try:
+            with pytest.raises(RuntimeError, match='out of graphics memory'):
+                process(settings, inputs / 'jump.mp4', runner)
+        finally:
+            CLASSIFIERS.pop('falls_over', None)
+        assert len(looks) < 200, 'the read stopped early'
+        assert not (folder / 'proxy.mp4').exists()
+
+    def test_the_load_is_never_read_on_the_callers_thread(self, monkeypatch):
+        from app import load
+        asked = []
+
+        class SlowMachine:
+            def read(self):
+                asked.append(threading.current_thread().name)
+                time.sleep(.2)
+                return load.Reading(processor=10.0, memory_free_gb=20.0, graphics=10.0, graphics_memory_free_gb=10.0)
+        monkeypatch.setattr(load, 'Machine', SlowMachine)
+        monkeypatch.setattr(load, 'WATCH_SECONDS', .05)
+        pacer = load.Pacer(limit=4)
+        began = time.monotonic()
+        pacer.may_start(1)
+        assert time.monotonic() - began < .1, 'answered from the last reading, without waiting for a new one'
+        deadline = time.monotonic() + 5
+        while not pacer.may_start(1) and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert pacer.may_start(1), 'once a reading has arrived there is room'
+        pacer.close()
+        assert asked and threading.current_thread().name not in asked
+
+    def test_an_insta360_trailer_with_a_nonsense_length_is_not_walked(self, tmp_path):
+        import struct
+        sys.path.insert(0, str(ROOT / 'v4_survey'))
+        import telemetry_scan as ts
+        path = tmp_path / 'damaged.insv'
+        path.write_bytes(b'\x01' * 5000 + b'\0' * 38 + struct.pack('<II', 2 ** 31, 3) + ts.INSTA360_MAGIC)
+        with path.open('rb') as handle:
+            assert ts.insta360_records(handle, path.stat().st_size) == {}
+
+    def test_long_names_that_shorten_to_the_same_clip_name_do_not_both_get_it(self, tmp_path):
+        from app.outputs import named_clip, plain_name
+        long = 'Boogie 2026 day three load seven formation skydive outside camera angle'
+        first, second = f'D:/in/{long} take one.mp4', f'D:/in/{long} take two.mp4'
+        assert named_clip(first, 'a_111111aaaaaaaaaa', 'A grade', 1, 1) == named_clip(second, 'b_222222bbbbbbbbbb',
+                                                                                    'A grade', 1, 1)
+        assert plain_name(tmp_path, first, 'a_111111aaaaaaaaaa')
+        assert not plain_name(tmp_path, second, 'b_222222bbbbbbbbbb'), 'so the second carries its code'
+
+    def test_the_graphics_card_is_asked_once_per_kind_of_video(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(media, 'probe_hardware', lambda ffmpeg, source, found, view: asked.append(source) or ON_CARD)
+        monkeypatch.setattr(media, 'HARDWARE_FOUND', {})
+        kind = {**FLAT, 'codec': 'hevc'}
+        for name in ('one.mp4', 'two.mp4', 'three.mp4'):
+            assert media.hardware_decode('ffmpeg', Path(name), kind) == ON_CARD
+        assert asked == [Path('one.mp4')]
+        media.hardware_decode('ffmpeg', Path('other.mp4'), {**kind, 'pix_fmt': 'yuv420p10le'})
+        assert len(asked) == 2, 'another kind is asked about afresh'
+        assert media.hardware_decode('ffmpeg', Path('one.mp4'), kind, wanted='off') == ()
+
+    def test_an_engine_whose_app_has_gone_stops_waiting(self, engine, tmp_path, monkeypatch):
+        module, _folder = engine
+        monkeypatch.setattr(module, 'caller_gone', lambda: True)
+        with pytest.raises(RuntimeError, match='has closed'):
+            module.wait_for(tmp_path / 'proxy.mp4')

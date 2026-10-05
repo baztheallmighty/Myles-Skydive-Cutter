@@ -76,9 +76,14 @@ def detection_metrics(boxes):
             'total_person_area_percent': sum(areas)}
 
 
+class ReadAbandoned(Exception):
+    """The read was stopped because whoever wanted it no longer does."""
+
+
 class PeopleSampler:
     def __init__(self):
         self.model = None
+        self.give_up = None   # set to a callable that turns true when this read has become pointless
 
     def sample(self, source, duration, settings, runner, media=None, proxy=None):
         """Count people in each view this run asks for, on the shared grid.
@@ -140,6 +145,8 @@ class PeopleSampler:
             try:
                 for index, frame in enumerate(read_frames(command, width, height)):
                     runner.check_cancelled()
+                    if self.give_up is not None and self.give_up():
+                        raise ReadAbandoned()
                     if index >= len(grid):
                         continue   # ffmpeg may round one frame past the end; the proxy still has to finish
                     boxes = detect_people(self.model, frame, settings.detection_confidence, self.person_ids)

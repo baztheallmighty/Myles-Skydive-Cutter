@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.5.1 (October 2026)
+
+Fixes from a review of 2.5.0. No change to results.
+
+- **The compile cache for sound analysis is now filled in a few seconds, on noise.** In 2.5.0 the first classifier
+  held the cache for a whole video's sound; on a long video another classifier could decide the first had died and
+  empty the cache under it, which is the fault 2.5.0 set out to fix.
+- **Automatic no longer freezes the window.** How busy the machine is, is now read on a thread of its own; the
+  window only looks at the last reading.
+- **A classifier that fails stops that video at once.** The rest of the video is no longer read first, and no proxy
+  file is left behind.
+- **Profiles switched off on the Advanced screen stay off** after a visit to Basic.
+- **A classifier whose app has closed stops waiting** on macOS and Linux, where it used to wait for hours.
+- **A damaged Insta360 file can no longer stall the motion check.**
+- **Two long file names that shorten to the same clip name** no longer collide; the second carries its code.
+- **Whether the graphics card can decode a kind of video is asked once**, not once per video.
+- Smaller: a help note is deleted when it closes, and Review works out each profile's matches once.
+
 ## 2.5.0 (October 2026)
 
 Faster processing, several videos at once, and an explanation beside every setting.

@@ -314,17 +314,24 @@ class VideoProcessor:
                     runner.log('Reading the video: counting people, and classifying jump phases alongside…')
                     runner.report_progress('people')
                     alongside.start()
+                    self.people.give_up = lambda: 'error' in started   # a classifier that failed needs no proxy
                     try:
                         people = self.people.sample(source, duration, settings, runner, proxy=prepared / 'proxy.mp4')
                     except BaseException:
+                        classifier_failed_first = 'error' in started   # before it is told to stop, which fails it too
                         (prepared / 'proxy.failed').write_text('', encoding='utf-8')   # tells the classifier to stop
                         alongside.join()
                         (prepared / 'proxy.mp4').unlink(missing_ok=True)
+                        if classifier_failed_first:
+                            raise started['error'] from None   # the read only stopped because the classifier had
                         raise
+                    finally:
+                        self.people.give_up = None
                     lap('people')
                     runner.report_progress('phases')
                     alongside.join()
                     if 'error' in started:
+                        (prepared / 'proxy.mp4').unlink(missing_ok=True)
                         raise started['error']
                     segments, duration, run_directory, agreement = started['result']
                 else:

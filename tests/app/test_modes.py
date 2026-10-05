@@ -305,6 +305,18 @@ class TestTheBasicScreen:
         assert in_use(built.read_settings()) == ['Mine', A_GRADE], 'and the built-in one stays ticked there too'
         built.close()
 
+    def test_a_profile_switched_off_in_advanced_stays_off_after_a_visit_here(self, basic):
+        build, _clips = basic
+        built, _application = build(Settings(mode='advanced', profiles=(KeepProfile(name='Mine'),)))
+        built.set_mode('basic')
+        built.set_mode('advanced')
+        assert 'Mine' in in_use(built.read_settings()), 'remembered across the first visit'
+        built.profiles = [replace(p, enabled=False) if p.name == 'Mine' else p for p in built.profiles]
+        built.set_mode('basic')
+        built.set_mode('advanced')
+        assert 'Mine' not in in_use(built.read_settings()), 'and not switched back on after the second'
+        built.close()
+
     def test_a_built_in_choice_edited_in_advanced_says_so_and_can_be_put_back(self, basic):
         build, _clips = basic
         built, application = build()

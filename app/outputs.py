@@ -113,7 +113,7 @@ def plain_name(state, source, output_name):
     on every later run.
     """
     path = Path(state) / 'clip_names.json'
-    stem = Path(source).stem.casefold()
+    stem = safe_stem(Path(source).stem).casefold()   # as named_clip writes it: two long names can shorten to one
     with NAMES_LOCK:
         try:
             names = json.loads(path.read_text(encoding='utf-8'))

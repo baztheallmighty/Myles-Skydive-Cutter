@@ -72,7 +72,7 @@ def probe(source: Path, ffprobe: str) -> dict:
     turned = next((number(item.get('rotation')) for item in stream.get('side_data_list', []) if 'rotation' in item),
                   number(stream.get('tags', {}).get('rotate')))
     return {'duration_sec': duration, 'width': width, 'height': height, 'kind': kind,
-            'pix_fmt': stream.get('pix_fmt') or '',
+            'pix_fmt': stream.get('pix_fmt') or '', 'codec': stream.get('codec_name') or '',
             'video_stream_count': len(videos), 'audio_stream_count': len(audio),
             'audio_offset_sec': number(audio[0].get('start_time')) - start if audio else None,
             'rotation': int(turned)}
@@ -213,6 +213,23 @@ def hardware_decode(ffmpeg: str, source: Path, media: dict, view: str = 'front',
     """
     if wanted != 'auto':
         return ()
+    # Recordings of one kind from one camera all decode the same way, so the answer for the first serves the rest.
+    # A file that turns out not to (damaged, or an odd variant) is caught when it is read: that falls back by itself.
+    kind = (ffmpeg, media.get('codec'), media.get('pix_fmt'), media.get('width'), media.get('height'),
+            media.get('rotation'), video_map(media, view)) if media.get('codec') else None
+    if kind in HARDWARE_FOUND:
+        return HARDWARE_FOUND[kind]
+    found = probe_hardware(ffmpeg, source, media, view)
+    if kind is not None:
+        HARDWARE_FOUND[kind] = found
+    return found
+
+
+HARDWARE_FOUND: dict = {}
+
+
+def probe_hardware(ffmpeg: str, source: Path, media: dict, view: str) -> tuple:
+    """Try each hardware decoder on the first frames of this file; the first that works without complaint."""
     for method in HARDWARE_METHODS.get(sys.platform, ('cuda',)):
         # On an NVIDIA card the frames stay on the card until the unwanted ones are dropped (see ``downloaded``).
         on_card = ON_CARD if method == 'cuda' and media.get('pix_fmt') in DOWNLOADED and not media.get('rotation') else []

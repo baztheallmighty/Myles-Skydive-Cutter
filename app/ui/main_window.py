@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
         self.mode = self.settings.mode
         self.advanced_names = list(self.settings.advanced_enabled)
         if self.mode == 'basic':
-            self.leave_advanced()
+            self.leave_advanced(opening=True)
             if fresh:   # a first run: trimming is the thing most people came for, and nothing else is in use
                 self.set_built_in(TRIM, enabled=True)
                 self.advanced_names = []
@@ -199,11 +199,16 @@ class MainWindow(QMainWindow):
                 return
         self.profiles.append(replace(built_in_profiles()[name], **changes))
 
-    def leave_advanced(self):
-        """Basic mode runs only the built-in profiles: the others are switched off, and remembered for coming back."""
+    def leave_advanced(self, opening=False):
+        """Basic mode runs only the built-in profiles: the others are switched off, and remembered for coming back.
+
+        ``opening``: the window is starting on the Basic screen, where they are already off and the list saved last
+        time is the one to keep. Leaving Advanced by hand always replaces it, so a profile switched off there stays
+        off.
+        """
         built = built_in_profiles()
         own = [p.name for p in self.profiles if p.enabled and p.name not in built]
-        if own:
+        if own or not opening:
             self.advanced_names = own
         self.profiles = [p if p.name in built else replace(p, enabled=False) for p in self.profiles]
 
@@ -1195,6 +1200,8 @@ class MainWindow(QMainWindow):
                 return
             self.session = ProcessingSession(settings, existing_only, only, processor_factory=VideoProcessor)
             from app.load import Pacer
+            if self.pacer:
+                self.pacer.close()
             self.pacer = Pacer(graphics_wanted=settings.device != 'cpu') if settings.parallel_videos == 0 else None
             self.unreadable_reported = False
             save_settings(settings)
@@ -1354,6 +1361,9 @@ class MainWindow(QMainWindow):
 
     def finish_session(self):
         self.timer.stop()
+        if self.pacer:
+            self.pacer.close()
+            self.pacer = None
         self.active = self.stopping = False
         if self.session:
             self.session.drain()

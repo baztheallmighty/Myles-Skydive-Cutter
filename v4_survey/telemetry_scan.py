@@ -28,6 +28,7 @@ DJI_RATE_HZ = 10
 STANDARD_GRAVITY = 9.80665
 INSTA360_MAGIC = b'8db42d694ccc418790edff439fe026bf'
 INSTA360_MAX_BYTES = 256 * 1024 * 1024
+INSTA360_MAX_RECORDS = 256
 INSTA360_RATE_HZ = 200                               # averaged down to GoPro's rate, so spread and peak compare
 INSTA360_ACCEL = STANDARD_GRAVITY / 1024             # raw counts to m/s^2: +-32 g over 16 bits
 INSTA360_GYRO = math.radians(2000 / 32768)           # raw counts to rad/s: +-2000 deg/s over 16 bits
@@ -266,9 +267,12 @@ def insta360_records(handle, size):
     tail = handle.read(78)
     if not tail.endswith(INSTA360_MAGIC):
         return {}
-    start = size - struct.unpack_from('<I', tail, 38)[0]
+    trailer = struct.unpack_from('<I', tail, 38)[0]
+    if not 78 <= trailer <= size:
+        return {}   # a damaged file: without a believable length there is no telling where the records stop
+    start = size - trailer
     records, pos = {}, size - 78
-    while pos >= max(start, 0):
+    while pos >= start and len(records) < INSTA360_MAX_RECORDS:
         handle.seek(pos)
         kind, length = struct.unpack('<HI', handle.read(6))
         begin = pos - length

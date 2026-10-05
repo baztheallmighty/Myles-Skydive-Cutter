@@ -74,15 +74,17 @@ def judge(profile, rows, duration, phases_enabled=True, people_enabled=True):
     The count and the share of the picture are separate tests, so a second with someone in view who fills 2% of
     the picture is 'small', not 'nobody'.
     """
-    from app.profiles import joined_flags, matches, profile_spans
-    spans = profile_spans(profile, rows, duration, phases_enabled, people_enabled)
-    _flags, by_people = joined_flags(profile, rows, phases_enabled, people_enabled)
-    reasons = []
+    from app.profiles import joined_flags, matches, spans_from
+    flags, by_people = joined_flags(profile, rows, phases_enabled, people_enabled)
+    spans = spans_from(profile, flags, duration)   # in time order, as the rows are: one walk along both
+    reasons, at = [], 0
     for index, row in enumerate(rows):
         t = float(row['time_sec'])
         count = int(float(row.get('person_count') or 0))
         area = float(row.get('total_person_area_percent') or 0)
-        if any(start <= t < end for start, end in spans):
+        while at < len(spans) and spans[at][1] <= t:
+            at += 1
+        if at < len(spans) and spans[at][0] <= t:
             reasons.append('kept' if matches(profile, row, phases_enabled, people_enabled)
                            else 'joined' if index in by_people else 'extra')
         elif phases_enabled and row.get('phase') not in profile.phases:

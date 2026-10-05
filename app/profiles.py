@@ -74,8 +74,13 @@ def joined_flags(profile, rows, phases_enabled=True, people_enabled=True):
     return flags, by_people
 
 
-def profile_spans(profile, rows, duration, phases_enabled=True, people_enabled=True):
-    flags, _by_people = joined_flags(profile, rows, phases_enabled, people_enabled)
+def spans_from(profile, flags, duration):
+    """The clip spans for rows already marked kept-or-not: short ones dropped, extra footage added, neighbours joined."""
     spans = [(start, end) for start, end in build_spans(flags) if end - start >= profile.min_span_seconds]
     spans = [(max(0.0, start - profile.margin_before_seconds), end + profile.margin_after_seconds) for start, end in spans]
     return clamp_to_duration(merge_close_spans(spans, merge_gap=1.0), duration)
+
+
+def profile_spans(profile, rows, duration, phases_enabled=True, people_enabled=True):
+    flags, _by_people = joined_flags(profile, rows, phases_enabled, people_enabled)
+    return spans_from(profile, flags, duration)

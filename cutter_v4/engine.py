@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -173,7 +172,7 @@ def visual_windows(ffmpeg: str, proxy: Path, models: Models, batch_size: int):
     return torch.cat(features), torch.cat(logits), np.asarray(centres, dtype=np.float64)
 
 
-CACHE_LOCK_STALE_SECONDS = 600   # a holder that died leaves its lock; nobody takes this long to analyse one sound
+CACHE_LOCK_STALE_SECONDS = 600   # a holder that died leaves its lock; filling the cache takes seconds, not minutes
 
 
 def compile_cache_marker(folder: Path) -> Path:
@@ -188,20 +187,29 @@ def compile_cache_marker(folder: Path) -> Path:
     return folder / ('.filled-' + '-'.join(versions) + f'-py{sys.version_info.major}{sys.version_info.minor}')
 
 
-@contextmanager
-def compile_cache():
-    """Hold the sound analysis's compile cache while it is being filled for the first time.
+def warm_sound_analysis() -> None:
+    """Run the audio features once on three seconds of noise, which compiles and saves every routine they use."""
+    from cutter_v4.audio import SAMPLE_RATE, WINDOW_SECONDS, clip_features
+    noise = np.random.default_rng(0).standard_normal(int(WINDOW_SECONDS * SAMPLE_RATE)).astype(np.float32) * .1
+    clip_features(noise)
+
+
+def prepare_compile_cache(fill=warm_sound_analysis) -> None:
+    """Make sure the sound analysis's compile cache is whole before this engine reads from it.
 
     The audio features use librosa, which compiles its inner loops on first use and saves them under
     NUMBA_CACHE_DIR. Several engines filling that folder at once (videos processed side by side on a fresh
     install) leave it damaged, and from then on every engine crashes the moment it analyses sound, even one at a
     time. So the first fill is done by one engine while any others wait; once the marker is there the cache is only
     read, which is safe side by side. A cache with no marker is not trusted: it is emptied and filled again.
+
+    The fill is ``fill`` on a few seconds of noise, not a video's own sound, so the lock is held for seconds
+    however long the video is. That matters for the stale-lock rule below: a lock is only taken over when its
+    holder cannot still be working.
     """
     folder = Path(os.environ['NUMBA_CACHE_DIR'])
     marker = compile_cache_marker(folder)
     if marker.is_file():
-        yield
         return
     lock = folder.with_name(folder.name + '.filling')
     folder.parent.mkdir(parents=True, exist_ok=True)
@@ -219,12 +227,11 @@ def compile_cache():
             time.sleep(.5)
     try:
         if marker.is_file():   # another engine filled it while this one waited
-            yield
             return
         log('audio: preparing the sound analysis for first use')
         shutil.rmtree(folder, ignore_errors=True)
         folder.mkdir(parents=True, exist_ok=True)
-        yield
+        fill()
         marker.write_text('filled by one engine; safe to read side by side\n', encoding='utf-8')
     finally:
         try:
@@ -239,9 +246,9 @@ def audio_track(source: Path, ffmpeg: str, work: Path, media: dict, models: Mode
         return [], 'no_audio_stream'
 
     try:
-        with compile_cache():
-            from cutter_v4.audio import audio_features
-            values, centres, _duration = audio_features(source, ffmpeg, work, media['audio_offset_sec'] or 0.0)
+        prepare_compile_cache()
+        from cutter_v4.audio import audio_features
+        values, centres, _duration = audio_features(source, ffmpeg, work, media['audio_offset_sec'] or 0.0)
     except Exception as exc:  # noqa: BLE001 - audio is optional; the video result stands without it
         log(f'audio unavailable: {exc}')
         return [], 'error'
@@ -322,7 +329,17 @@ def resolve_device(device: str) -> str:
     return 'cpu'
 
 
-PROXY_WAIT_SECONDS = 6 * 3600   # longer than any read of one video; a caller that dies leaves its marker or nothing
+PROXY_WAIT_SECONDS = 6 * 3600   # longer than any read of one video
+STARTED_BY = os.getppid()       # the app, when the app started this engine
+
+
+def caller_gone() -> bool:
+    """True when the process that started this engine has exited, leaving nobody to write the proxy.
+
+    On Windows the app's job object ends the engine with it. Elsewhere a child outlives its parent and is handed to
+    another one, which is what this notices.
+    """
+    return os.name != 'nt' and os.getppid() != STARTED_BY
 
 
 def wait_for(proxy: Path) -> None:
@@ -331,6 +348,8 @@ def wait_for(proxy: Path) -> None:
     while not proxy.is_file():
         if gave_up.exists():
             raise RuntimeError('The video could not be read, so there is nothing to classify.')
+        if caller_gone():
+            raise RuntimeError('The app that asked for this video has closed.')
         if time.monotonic() > deadline:
             raise TimeoutError('The prepared proxy never arrived.')
         time.sleep(.1)

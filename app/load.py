@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 from app.settings import MAX_PARALLEL_VIDEOS
@@ -17,6 +18,7 @@ BUSY_GRAPHICS = 85.0         # percent
 SPARE_MEMORY_GB = 4.0        # left free for the rest of the machine
 SPARE_GRAPHICS_MEMORY_GB = 3.0   # one video's models and decoder need about 2 GB
 SETTLE_SECONDS = 20.0        # how long a newly started video takes to show its full load
+WATCH_SECONDS = 2.0          # how often the load is read while Automatic is deciding
 CORES_PER_VIDEO = 4          # decoding and proxy encoding for one video keep about this many cores busy
 
 
@@ -63,13 +65,31 @@ class Pacer:
     """Decides when Automatic adds a video: room on the machine, and time for the last one to show its load."""
 
     def __init__(self, machine=None, limit=None, graphics_wanted=True, clock=time.monotonic):
+        """With no ``machine`` given, this one is read on a thread of its own every couple of seconds, because
+        asking the graphics card how busy it is means running a program, and the window must never wait for one.
+        A ``machine`` handed in (the tests do) is read on the spot."""
+        self.watching = machine is None
         self.machine = machine or Machine()
         self.limit = limit or most_at_once()
         self.graphics_wanted = graphics_wanted
         self.clock = clock
         self.last_start = None
         self.reason = ''
-        self.machine.read()   # the first processor reading needs something to compare with
+        self.closed = threading.Event()
+        self.latest = Reading()
+        if self.watching:
+            threading.Thread(target=self.watch, daemon=True).start()
+        else:
+            self.machine.read()   # the first processor reading needs something to compare with
+
+    def watch(self):
+        self.machine.read()
+        while not self.closed.wait(WATCH_SECONDS):
+            self.latest = self.machine.read()
+
+    def close(self):
+        """Stop reading the load; the run that needed it is over."""
+        self.closed.set()
 
     def started(self):
         self.last_start = self.clock()
@@ -78,7 +98,8 @@ class Pacer:
         if running and self.last_start is not None and self.clock() - self.last_start < SETTLE_SECONDS:
             self.reason = 'the last video started is still getting going'
             return False
-        answer, self.reason = may_start(running, self.machine.read(), self.limit, self.graphics_wanted)
+        reading = self.latest if self.watching else self.machine.read()
+        answer, self.reason = may_start(running, reading, self.limit, self.graphics_wanted)
         return answer
 
 

@@ -182,6 +182,9 @@ class TestTheWindow:
             def may_start(self, running):
                 return running < 3
 
+            def close(self):
+                pass
+
             def started(self):
                 pass
         monkeypatch.setattr(load, 'Pacer', RoomForThree)

@@ -90,9 +90,11 @@ class TestHelpNotes:
         button.click()
         application.processEvents()
         assert button.note.isVisible()
+        from app.ui.help import HelpNote
         button.note.close()
         application.processEvents()
         assert not button.testAttribute(Qt.WidgetAttribute.WA_UnderMouse) and not button.hasFocus()
+        assert button.note is None and button.window().findChildren(HelpNote) == [], 'the note is gone, not hidden'
 
 
 class TestWhatToKeep:
