@@ -209,8 +209,9 @@ def fetch_tools() -> Path:
 
 def build(test_build: bool = False) -> Path:
     import build_cutter_package as package
-    if package.MAC:
-        raise SystemExit('The installer is for Windows; the macOS package is built by build_cutter_package.py --mac.')
+    if package.UNIX:
+        raise SystemExit('The installer is for Windows; the macOS and Linux packages are built by '
+                         'build_cutter_package.py --mac and --linux.')
     compiler = find_compiler()
     if compiler is None:
         raise SystemExit('The Inno Setup compiler (ISCC.exe) was not found. Run this once with --fetch-tools, '

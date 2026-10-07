@@ -13,6 +13,7 @@ Also see the [Output and CSV reference](OUTPUT_REFERENCE.md), [How it works](HOW
 
 - [First run](#first-run)
 - [Basic and Advanced](#basic-and-advanced)
+- [How video is chosen in basic mode](#how-video-is-chosen-in-basic-mode)
 - [The Process tab](#the-process-tab)
 - [Keep profiles](#keep-profiles)
 - [Processing videos](#processing-videos)
@@ -31,7 +32,7 @@ Also see the [Output and CSV reference](OUTPUT_REFERENCE.md), [How it works](HOW
    the [README](../README.md#install)); later runs check in a second and open straight away.
 2. Choose **Videos to process** (folders inside it are included) and **Save clips to**. You can also drag a folder
    from Explorer onto either box.
-3. Tick what to keep: **Trim my footage**, **A grade**, **B grade**, or any mix (see
+3. Tick what to keep: **Trim my video**, **A grade video**, **B grade video**, or any mix (see
    [Basic and Advanced](#basic-and-advanced)).
 4. Click **Process videos**.
 5. When videos appear in **Results**, double-click one, or open the **Review** tab, to see what was cut.
@@ -45,9 +46,12 @@ Two buttons at the top of the Process tab choose the screen. A new install opens
 
 | Choice | What it keeps | Its own settings |
 | --- | --- | --- |
-| **Trim my footage** | The jump itself: exit, freefall, break-off and the opening. It does not look for people, so it is the fastest. | Seconds before exit (0 to 10). **Also keep the landing**, with 0 to 10 seconds either side, as a second clip. |
-| **A grade (day tape)** | At least 1 person in view filling 20% of the picture, from exit to the end of break-off. | **Include canopy flight with others in view**: at least 2 people filling 20%. That count includes you. |
-| **B grade** | Everything A grade keeps, plus looser footage: people fill 10%, gaps up to 6 seconds are joined, and gaps up to 10 seconds are joined while at least 3 people are still in view. | None. |
+| **Trim my video** | For the end of the day: each video cut down to the jump itself (exit, freefall, break-off and the opening), so it takes up less space. The plane ride, canopy flight and the walk back are left out. It does not look for people, so it is the fastest. | Seconds before exit. **Also keep the landing**, with seconds either side, as a second clip. Both numbers can be as large as you like. |
+| **A grade video** | The best video: at least 1 person in view filling 20% of the picture, from exit to the end of break-off. Professional video shot by a cameraman would count as A grade. | **Include the exit**, ticked to begin with: untick it if you end up with more exits than you want, and A grade starts at freefall. **Include canopy flight with others in view**: at least 2 people filling 20%. That count includes you. |
+| **B grade video** | Not as good, for when A grade alone does not give you enough. Everything A grade keeps, plus looser video: people fill 10%, gaps up to 6 seconds are joined, and gaps up to 10 seconds are joined while at least 3 people are still in view. It always includes the exit. | None. |
+
+A grade and B grade are about how good the video is. If you are putting together a video of the day, start with
+A grade; if that gives you enough, use only that, and if it does not, add B grade.
 
 Each choice gets a folder inside your clips folder (`Trimmed`, `A grade`, `B grade`). Clips are named after the video
 they came from, for example `GOPR0001 - A grade.mp4`, with a number when one video gives several. If two cards both
@@ -59,6 +63,187 @@ companions, `Trimmed landing` and `A grade canopy`), and can be edited like any 
 shows "Changed in advanced mode" on the Basic screen, with **Put back** to return it to its built-in settings.
 Profiles of your own are switched off, not deleted, while the Basic screen is showing, and come back on when you
 return to Advanced.
+
+## How video is chosen in basic mode
+
+**How video is chosen in basic mode**, at the top right of the Process tab, opens this explanation in the app.
+
+This page explains what the app does to a video between you clicking Process videos and the clips appearing in your
+folder. It describes the three choices on the Basic screen. Advanced mode uses the same steps but gives you more
+control: you can build your own profiles and set every number mentioned below yourself.
+
+There are four steps. The app labels each second of the video, counts the people in each second, decides which seconds
+each choice wants to keep, and then turns those seconds into clips.
+
+### Step 1: The app labels every second with a stage of the jump
+
+The app watches the whole video and gives every second one label. There are nine labels, which we call stages:
+
+1. In the plane
+2. Climbing out
+3. Exit
+4. Freefall
+5. Break-off
+6. Opening
+7. Canopy flight
+8. Landing
+9. Landed
+
+To do this it uses three things: the picture, the sound, and the motion data that some cameras record (GoPro and DJI
+cameras, for example).
+
+**The stages only go forwards.** A skydive always happens in the order above, so the app is not allowed to go back to
+an earlier stage. Once it has decided you have exited, no later second can be labelled "in the plane", even if the
+picture looks like the inside of a plane for a moment. Once your canopy is open, no later second can be labelled
+freefall. This rule stops the app from making silly mistakes, such as deciding you were in freefall for two seconds in
+the middle of your canopy ride.
+
+**A stage can be missing.** If you press record after you have already left the plane, the video has no "in the
+plane", no "climbing out" and no "exit". That is fine. The app skips them and starts at freefall.
+
+**The app expects one jump per video.** This follows from the forwards-only rule. If one file contains two jumps, the
+second jump would need the stages to start again from the beginning, which is not allowed. The app will find one of
+the jumps and get the other wrong. If your camera recorded two jumps in one file, split the file into two before
+processing it.
+
+**How sound is used.** The picture is what decides the stages. Sound is allowed to change the answer in one situation
+only. If your camera does not record motion data, and the picture says freefall has ended but the sound of the wind
+says you are still falling, the app keeps freefall going for up to 30 more seconds. This is because, in testing, the
+picture sometimes ended freefall too early on these cameras.
+
+In every other case, sound and motion are used only as a second opinion. If they disagree with the picture, the answer
+does not change, but the Review tab shows that part of the video in amber so you know where to look.
+
+**Break-off is the least exact stage.** When exactly a group starts to break off is a matter of opinion, and two
+people watching the same video will often disagree by a second or two. So expect the end of freefall to be a second or
+two early or late. This is why each choice adds a little extra video at the end of every clip.
+
+### Step 2: The app counts the people in every second
+
+Once a second, the app looks at the picture and finds the people in it. It draws a box around each person and records
+two numbers for that second:
+
+- How many people it found.
+- How much of the picture they fill, as a percentage. This is the area of all the boxes added together.
+
+To give you a feel for the second number: one person close to the camera fills about 20% of the picture. A jumper on
+the far side of a formation might fill only 1% to 3%.
+
+**You (the camera person) count as a person.** Under canopy and on landing, your own legs and arms can be in shot, and
+the app counts them as one person. So "2 people in view" under canopy usually means you and one other.
+
+**The count of people never changes the classification of stages.** Step 1 is finished before the people are looked
+at. The people count only decides which seconds of a stage are worth keeping.
+
+Trim my video skips this step completely, because it does not care who is in the picture. That is why it is the
+fastest choice.
+
+### Step 3: Each choice decides which seconds match its criteria
+
+The app now has, for every second, a stage and a people count. Each choice you ticked goes through the video and marks
+the seconds that match its criteria.
+
+Trim my video matches every second that is in exit, freefall, break-off or opening. It does not look at people at all.
+
+A grade video matches a second when both of these are true:
+
+- The second is in exit, freefall or break-off (or only freefall and break-off, if you unticked "Include the exit").
+- At least 1 person is in view and people fill at least 20% of the picture.
+
+B grade video uses the same stages as A grade, always with the exit included, but people only need to fill 10% of the
+picture.
+
+### Step 4: The matching seconds are then turned into clips
+
+The matching seconds are rarely one neat block. Someone drifts out of shot for a second, or the camera looks away. So
+the app tidies up, always in this order.
+
+**First, short gaps are filled in.** This only matters for A grade and B grade. If there is matching video, then a
+short gap, then more matching video, the gap is filled so you get one clip instead of two. A grade fills gaps of up to
+2 seconds. B grade fills gaps of up to 6 seconds, and up to 10 seconds if at least 3 people stayed in view during the
+gap, even if they were small in the picture.
+
+Trim my video has no gaps to fill: the stages it keeps always follow straight on from each other, so it is always one
+clip.
+
+A gap is only filled when there is matching video on both sides of it. Filling gaps never makes a clip start earlier
+or end later.
+
+**Second, short matches that stand alone are dropped (A grade and B grade only).** After the gaps are filled, anything
+still shorter than 2 seconds is thrown away. This only removes a brief glimpse of someone with nothing else near it. A
+run of short matches close together has already been joined into one longer match by the first step, so it is kept.
+
+**Third, extra seconds are added to each end.** This gives each clip a lead-in and covers the uncertainty about where
+break-off ends. A grade adds 2 seconds before and 2 after. B grade adds 2 before and 3 after. Trim my video adds the
+seconds you chose before the exit, and 1 second after the canopy is open.
+
+**Fourth, clips that now touch are joined.** If adding the extra seconds makes two clips overlap, or leaves them less
+than a second apart, they become one clip.
+
+**Last, the clip is cut from your original video.** The app copies that part of the file without re-encoding it. This
+is quick, and the clip has exactly the quality of your original. The one side effect is that a copy can only begin at
+certain frames in the original, called keyframes. So a clip may start a second or two earlier than the app planned. It
+is never shorter than planned.
+
+### An example
+
+Say you film a 4-way and the video is 6 minutes long. The app labels it like this:
+
+| Time | Stage |
+| --- | --- |
+| 0:00 to 3:02 | In the plane |
+| 3:02 to 3:10 | Climbing out |
+| 3:10 to 3:16 | Exit |
+| 3:16 to 4:05 | Freefall |
+| 4:05 to 4:10 | Break-off |
+| 4:10 to 4:15 | Opening |
+| 4:15 to 6:00 | Canopy flight, landing, landed |
+
+Trim my video keeps exit through opening, 3:10 to 4:15. With 2 seconds added before and 1 after, you get one clip from
+3:08 to 4:16. A 6 minute video has become a 68 second clip.
+
+A grade video also looks at the people. Suppose someone is close to the camera (filling 20% or more of the picture) at
+these times:
+
+3:10 to 3:14, on the exit
+3:25 to 3:40
+3:41 to 3:58
+4:02 to 4:03
+
+Here is what happens:
+
+- The gap between 3:40 and 3:41 is 1 second, so it is filled. That gives one match from 3:25 to 3:58.
+- The gap between 3:14 and 3:25 is 11 seconds, which is too long to fill. The exit stays separate.
+- The match at 4:02 lasts 1 second and stands alone, so it is dropped.
+- Two seconds are added to each end of what is left.
+
+You get two clips: 3:08 to 3:16 (the exit) and 3:23 to 4:00 (the freefall). If you had unticked "Include the exit",
+you would get only the second one.
+
+B grade video would give you more from the same jump, because people only need to fill 10% of the picture and longer
+gaps are filled.
+
+### The exact numbers for each choice
+
+- **Trim my video:** Keeps exit, freefall, break off and opening parachutes, whether or not anyone is in view; 2 s
+  extra before and 1 s after, gaps up to 4 s joined.
+- **Its landing:** Keeps landing, whether or not anyone is in view; 5 s extra before and 5 s after, gaps up to 4 s
+  joined.
+- **A grade video:** Keeps exit, freefall and break off while at least 1 person is in view and people fill 20% of the
+  picture; 2 s extra before and 2 s after, matches under 2 s ignored, gaps up to 2 s joined.
+- **Its canopy flight:** Keeps canopy flight while at least 2 people are in view and people fill 20% of the picture; 2
+  s extra before and 2 s after, matches under 4 s ignored, gaps up to 2 s joined.
+- **B grade video:** Keeps exit, freefall and break off while at least 1 person is in view and people fill 10% of the
+  picture; 2 s extra before and 3 s after, matches under 2 s ignored, gaps up to 6 s joined, gaps up to 10 s joined
+  while at least 3 people are still in view.
+
+**Check for updates**, beside that button, asks whether a newer version has been published and tells you the answer. The app
+also asks by itself when it starts. When there is a newer version, a line at the top of the window says so, and
+**Get the update** opens the download page in your browser; nothing is installed for you.
+
+When reporting a problem, press **Ctrl+Shift+D** in the app. It saves a diagnostics file in the app's `logs` folder
+and copies it, ready to paste: what the screen and the window look like to the app and how long recent videos
+took, with no folder or file names.
 
 ## The Process tab
 
@@ -265,6 +450,7 @@ you left open.
 | **Graphics memory use (batch size)** | Video windows per GPU batch. Lower it if a small graphics card runs out of memory. |
 | **360 camera footage** | Which side of a 360 camera to use: **Front view only** (the default), **Front view, people counted all round**, or **Back view only**. Ordinary cameras ignore it. See [360 footage](#360-footage). |
 | **Re-cut a video as soon as you mark it reviewed** | On by default. Off: reviews are used the next time you click Process videos. |
+| **Check for a newer version when the app starts** | On by default. One request to GitHub for the latest version number; nothing about your PC or videos is sent and nothing is installed. Off: the app never connects. |
 
 **People**
 

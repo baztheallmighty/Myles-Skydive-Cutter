@@ -1,5 +1,6 @@
 """One dark theme for the whole app, including the labeller."""
 from pathlib import Path
+from app.system import MACOS, WINDOWS
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
@@ -51,6 +52,8 @@ QLabel#banner {{ background: {DANGER_BACKGROUND}; color: {DANGER_TEXT}; border: 
                  border-radius: 4px; padding: 9px 12px; }}
 QLabel#bannerWarning {{ background: {WARNING_BACKGROUND}; color: {WARNING_TEXT}; border: 1px solid #a07a30;
                         border-radius: 4px; padding: 9px 12px; }}
+QLabel#bannerUpdate {{ background: {GOOD_BACKGROUND}; color: {TEXT}; border: 1px solid {GOOD};
+                       border-radius: 4px; padding: 7px 12px; }}
 QPushButton#fix {{ background: {DANGER}; color: #ffffff; font-weight: bold; padding: 6px 14px; border-radius: 4px; }}
 QToolButton#section {{ border: 0; font-weight: bold; padding: 4px 2px; text-align: left; color: {TEXT}; }}
 QToolButton#section:hover {{ color: #ffffff; }}
@@ -62,6 +65,7 @@ QToolButton#help {{ border: 1px solid #5d6b80; border-radius: 10px; color: {MUTE
                     background: transparent; padding: 0; }}
 QToolButton#help:hover {{ border-color: #8cc4ea; color: {ACCENT_TEXT}; background: {ACCENT}; }}
 QFrame#helpNote {{ background: {SURFACE}; border: 1px solid #8cc4ea; border-radius: 6px; }}
+QLabel#rulesTitle {{ font-size: 15px; font-weight: bold; color: {HEADING}; padding-bottom: 2px; }}
 QLabel#helpTitle {{ font-weight: bold; color: {ACCENT_TEXT}; padding-bottom: 4px; }}
 QFrame#cardTrim, QFrame#cardA, QFrame#cardB {{ border-radius: 6px; background: {SURFACE}; }}
 QFrame#cardTrim {{ border-left: 6px solid #3b82c4; }}
@@ -108,13 +112,20 @@ def apply(application) -> None:
     if not getattr(application, 'wheel_guard', None):
         application.wheel_guard = WheelGuard(application)
         application.installEventFilter(application.wheel_guard)
-    font_path = 'C:/Windows/Fonts/segoeui.ttf'
-    try:
-        QFontDatabase.addApplicationFont(font_path)  # explicit fallback also renders in offscreen tests
-    except Exception:  # noqa: BLE001
-        pass
     application.setStyle('Fusion')
-    application.setFont(QFont('Segoe UI', 10))
+    if MACOS:
+        # A Mac has no Segoe UI, and asking for it by name gets whatever Qt substitutes. Its own system font, at the
+        # size the system uses for controls, is what every other Mac app shows.
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        font.setPointSize(13)
+        application.setFont(font)
+    elif WINDOWS:
+        font_path = 'C:/Windows/Fonts/segoeui.ttf'
+        try:
+            QFontDatabase.addApplicationFont(font_path)  # explicit fallback also renders in offscreen tests
+        except Exception:  # noqa: BLE001
+            pass
+        application.setFont(QFont('Segoe UI', 10))
     palette = QPalette()
     for role, color in [(QPalette.Window, BACKGROUND), (QPalette.WindowText, TEXT), (QPalette.Base, BASE),
                         (QPalette.AlternateBase, SURFACE), (QPalette.Text, TEXT), (QPalette.Button, BUTTON),

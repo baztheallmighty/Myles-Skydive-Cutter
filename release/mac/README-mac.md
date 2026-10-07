@@ -13,10 +13,11 @@ the Basic screen. Please tell me what happens: the setup log is in the `logs` fo
 - macOS 13 (Ventura) or newer. Setup checks this first and stops with a message on anything older, because the
   libraries it installs publish nothing for older macOS.
 - An Apple Silicon Mac (M1 or later), or an Intel Mac that runs macOS 13: in practice a 2017 or later model.
-- On Apple Silicon, Apple's Rosetta 2, because the FFmpeg builds ffmpeg.org points to are Intel programs. Most Macs
-  already have it. Setup checks first and, if it is missing, tells you the one command that installs it.
+- Nothing else. On Apple Silicon, setup gets an FFmpeg built for Apple Silicon (see
+  [Where FFmpeg comes from](#where-ffmpeg-comes-from)). Apple's Rosetta 2 is only needed if that fails and setup
+  has to fall back to the Intel build; it then tells you the one command that installs it.
 - About 6 GB free while installing. Setup checks this first too.
-- Internet for the first run only.
+- Internet for the first run only. After that the app only asks, once at start-up, whether a newer version is out.
 
 ## Install
 
@@ -88,7 +89,7 @@ Mac's own GPU) and, in the list of what was tested, the Windows installer.
 ## Using it
 
 The app opens on the **Basic** screen: choose the folder with your videos and a folder for the clips, tick **Trim my
-footage**, **A grade**, **B grade** or any mix, and click **Process videos**. Each choice gets its own folder, and
+video**, **A grade video**, **B grade video** or any mix, and click **Process videos**. Each choice gets its own folder, and
 clips are named after the video they came from. The **Advanced** button shows every profile and setting, each with a
 **?** that explains it. The [user guide](docs/USER_GUIDE.md) has the rest.
 
@@ -101,8 +102,25 @@ released with:
 | --- | --- | --- |
 | Python 3.12.14 | astral-sh/python-build-standalone | its pinned SHA-256 |
 | PyTorch, the person detector (Ultralytics YOLO, AGPL-3.0) and every other library | PyPI, pre-built only | the SHA-256 of each file, listed in `requirements-mac-arm64.txt` or `requirements-mac-intel.txt` |
-| FFmpeg and FFprobe 9.0.2 | evermeet.cx static builds, the macOS builds linked from ffmpeg.org | setup checks each runs and is FFmpeg 7 or newer; the publisher's signatures were checked before release |
+| FFmpeg and FFprobe, Apple Silicon | Homebrew's copy if Homebrew is installed and has one; otherwise the 9.0.2 build from ffmpeg.martin-riedl.de | Homebrew's: that it runs, is FFmpeg 7 or newer, is built for Apple Silicon, and has the x264 encoder and Apple's decoder. The download: its pinned SHA-256, then the same checks |
+| FFmpeg and FFprobe 9.0.2, Intel | Homebrew's copy if there is one; otherwise evermeet.cx static builds, the macOS builds linked from ffmpeg.org. Also the last resort on Apple Silicon, through Rosetta 2 | setup checks each runs and is FFmpeg 7 or newer; the publisher's signatures were checked before release |
 | The person detector's model | Ultralytics' release page | its pinned SHA-256 |
+
+## Where FFmpeg comes from
+
+FFmpeg is the program that reads and cuts the video. The FFmpeg project publishes source code only, and the one
+macOS build its website links to (evermeet.cx) is made for Intel Macs. On an Apple Silicon Mac that build runs
+through Rosetta 2, which works but is slower. So setup picks, in this order:
+
+1. **Homebrew's FFmpeg**, if you already have Homebrew and its FFmpeg. Homebrew builds it from FFmpeg's own
+   source for your Mac. The app links to it and does not copy it, so it stays current when Homebrew updates it.
+   Setup never installs Homebrew or anything into it.
+2. **On Apple Silicon, a build made for Apple Silicon** from ffmpeg.martin-riedl.de, downloaded into the app
+   folder and checked against a pinned checksum.
+3. **The Intel build from evermeet.cx.** This is what an Intel Mac gets. On Apple Silicon it is the last resort,
+   used only if the first two did not give a working FFmpeg.
+
+Setup says which one it used on its last lines, and `installation.json` records it.
 
 ## Licence
 

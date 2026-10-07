@@ -23,6 +23,18 @@ the ZIP and the installer always carry the same thing.
    The first time on a PC, add `--fetch-tools` (see below).
 5. Test the installer (next section).
 
+The macOS and Linux packages are built from the same file list with their own setup scripts (`release/mac`,
+`release/linux`):
+
+```bat
+python release\build_cutter_package.py --mac
+python release\build_cutter_package.py --linux
+```
+
+They land beside the others as `Skydive-Cutter-<version>-macos.zip` and `Skydive-Cutter-<version>-linux.zip`.
+Neither can be run on this PC, so their tests are the ones in `tests\app` that check the scripts from Windows.
+The pinned libraries for every platform are written by `python release\lock_requirements.py`.
+
 Both land in `release\dist`, each with a `.sha256` beside it:
 
 - `Skydive-Cutter-<version>-windows.zip`

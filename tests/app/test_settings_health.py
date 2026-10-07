@@ -95,7 +95,7 @@ class TestFingerprint:
                   'recut_on_review': False, 'window_geometry': 'AAA', 'column_state': 'BBB',
                   'open_sections': ('output',), 'device': 'cpu', 'batch_size': 2,
                   'hardware_decode': 'off', 'parallel_videos': 3, 'mode': 'advanced',
-                  'advanced_enabled': ('Mine',)}
+                  'advanced_enabled': ('Mine',), 'check_updates': False}
         changed = replace(self.base, **{field_name: values[field_name]})
         assert settings_fingerprint(changed) == settings_fingerprint(self.base)
 

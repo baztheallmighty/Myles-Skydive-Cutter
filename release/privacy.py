@@ -24,13 +24,28 @@ GENERIC_TEXT = [
     r'[A-Za-z]:[\\/]+Users[\\/]+(?!Public\b|WDAGUtilityAccount\b|<|me\b)[^\\/\s"\'`]+',   # someone's user folder
     r'/Users/(?!me\b|Shared\b|<)[A-Za-z0-9._-]+',                                         # the same on a Mac
     r'DESKTOP-[A-Z0-9]{5,}',                                                              # a Windows machine name
-    r'\b192\.168\.\d+\.\d+', r'\b10\.\d+\.\d+\.\d+\b', r'\b172\.(1[6-9]|2\d|3[01])\.\d+\.\d+',
+    # Not after "==": a pinned package version such as nvidia-curand-cu12==10.3.7.77 is not a network address.
+    r'\b192\.168\.\d+\.\d+', r'(?<!==)\b10\.\d+\.\d+\.\d+\b', r'\b172\.(1[6-9]|2\d|3[01])\.\d+\.\d+',
     r'credential\.xml',
     r'\b[A-Za-z0-9._%+-]+@(?!(example|anthropic)\.)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',     # an email address
     r'(ghp_[A-Za-z0-9]{20,}|github' r'_pat_|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY)',  # a credential
 ]
 # Model files are binary: short patterns occur by chance in weights, so only long ones are checked there.
 GENERIC_BINARY = [r'C:[\\/]Users[\\/][^\\/]{3,}', r'DESKTOP-[A-Z0-9]{5,}', r'192\.168\.\d+\.\d+', r'credential\.xml']
+
+
+# The one place a private pattern is let through. The app has to know where its releases are published to say when a
+# newer one is out, and that address is public the moment a release is: allowed by the project owner on 6 October
+# 2026. Only these exact addresses pass; the same name anywhere else is still a finding.
+PUBLISHED = ('https://api.github.com/repos/baztheallmighty/Myles-Skydive-Cutter',
+             'https://github.com/baztheallmighty/Myles-Skydive-Cutter')
+
+
+def without_published(text: str) -> str:
+    """The text with the published addresses blanked out, keeping every other character where it was."""
+    for address in PUBLISHED:
+        text = text.replace(address, 'https://' + '_' * (len(address) - len('https://')))
+    return text
 
 
 def local_patterns() -> tuple[list[str], list[str]]:
@@ -65,7 +80,7 @@ def findings(paths, root=ROOT) -> list[str]:
         name = path.relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
         data = (path if path.is_absolute() else root / path).read_bytes()
         if path.suffix.lower() in TEXT_SUFFIXES:
-            text = data.decode('utf-8', 'replace')
+            text = without_published(data.decode('utf-8', 'replace'))
             for match in text_pattern.finditer(text):
                 line = text.count('\n', 0, match.start()) + 1
                 problems.append(f'{name}:{line}: {text[max(0, match.start() - 40):match.end() + 40]!r}')

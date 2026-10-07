@@ -31,6 +31,20 @@ TORCH = {'torch', 'torchvision'}
 INTEL_MAC = {'numpy': '1.26.4', 'opencv-python': '4.11.0.86', 'torch': '2.2.2', 'torchvision': '0.17.2',
              'contourpy': '1.3.2'}   # contourpy 1.4 (for matplotlib) needs NumPy 2
 WINDOWS_PROFILES = ('cpu', 'cu118', 'cu128')
+# What PyTorch 2.7.1's own Linux wheel on PyPI asks for and Windows does not: NVIDIA's libraries as packages, so the
+# one install runs on an NVIDIA GPU where there is one and on the processor where there is not. These are the exact
+# versions that wheel names in its metadata; the check below fails if any is missing or wrong.
+# Written as pins, name==version: the privacy check reads a bare four-part number as a network address.
+LINUX_EXTRA = dict(pin.split('==') for pin in (
+    'nvidia-cuda-nvrtc-cu12==12.6.77', 'nvidia-cuda-runtime-cu12==12.6.77', 'nvidia-cuda-cupti-cu12==12.6.80',
+    'nvidia-cudnn-cu12==9.5.1.17', 'nvidia-cublas-cu12==12.6.4.1', 'nvidia-cufft-cu12==11.3.0.4',
+    'nvidia-curand-cu12==10.3.7.77', 'nvidia-cusolver-cu12==11.7.1.2', 'nvidia-cusparse-cu12==12.5.4.2',
+    'nvidia-cusparselt-cu12==0.6.3', 'nvidia-nccl-cu12==2.26.2', 'nvidia-nvtx-cu12==12.6.77',
+    'nvidia-nvjitlink-cu12==12.6.85', 'nvidia-cufile-cu12==1.11.1.6', 'triton==3.3.1'))
+# The oldest C library a Linux install is promised to work on (Ubuntu 20.04 has 2.31, Debian 11 has 2.31).
+LINUX_TAGS = ['manylinux_2_28_x86_64', 'manylinux_2_27_x86_64', 'manylinux_2_26_x86_64', 'manylinux_2_24_x86_64',
+              'manylinux_2_17_x86_64', 'manylinux2014_x86_64', 'manylinux_2_12_x86_64', 'manylinux2010_x86_64',
+              'manylinux_2_5_x86_64', 'manylinux1_x86_64']
 
 # name: (lock file, wheel platform test, pip --platform values for the check)
 PLATFORMS = {
@@ -40,6 +54,7 @@ PLATFORMS = {
     'mac-intel': (RELEASE / 'mac' / 'requirements-mac-intel.txt',
                   lambda tag: tag.startswith('macosx') and tag.endswith(('x86_64', 'universal2', 'intel')),
                   ['macosx_13_0_x86_64']),
+    'linux': (RELEASE / 'linux' / 'requirements-linux-x86_64.txt', lambda tag: tag in LINUX_TAGS, LINUX_TAGS),
 }
 
 
@@ -105,12 +120,13 @@ def lock_text(title: str, pins: list[tuple[str, str, list[str]]]) -> str:
 def write_locks() -> None:
     versions = tested_versions()
     for platform, (path, fits, _check) in PLATFORMS.items():
-        chosen = dict(versions, **(INTEL_MAC if platform == 'mac-intel' else {}))
+        chosen = dict(versions, **(INTEL_MAC if platform == 'mac-intel' else LINUX_EXTRA if platform == 'linux' else {}))
         names = sorted((n for n in chosen if platform != 'windows' or n not in TORCH), key=str.casefold)
         pins = [(name, chosen[name], pypi_hashes(name, chosen[name], fits)) for name in names]
         title = {'windows': 'Windows x64, Python 3.12: everything except PyTorch (see torch-<profile>.txt)',
                  'mac-arm64': 'Apple Silicon macOS 13+, Python 3.12',
-                 'mac-intel': 'Intel macOS 13+, Python 3.12: PyTorch 2.2.2 with NumPy 1.26 and OpenCV 4.11'}[platform]
+                 'mac-intel': 'Intel macOS 13+, Python 3.12: PyTorch 2.2.2 with NumPy 1.26 and OpenCV 4.11',
+                 'linux': 'Linux x86_64 (glibc 2.28+), Python 3.12: PyTorch from PyPI with the NVIDIA libraries'}[platform]
         path.write_text(lock_text(title, pins), encoding='utf-8', newline='\n')
         print(f'{path.relative_to(RELEASE.parent)}: {len(pins)} packages', flush=True)
     for profile in WINDOWS_PROFILES:

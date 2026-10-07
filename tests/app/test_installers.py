@@ -171,13 +171,18 @@ class TestMacScripts:
 
 # Where each download may come from: the project's own site, or a build site the project's download page links to.
 # ffmpeg.org/download.html links gyan.dev (and gyan.dev its GitHub mirror) for Windows and evermeet.cx for macOS.
+# The one exception is named as one: ffmpeg.org links to no build for Apple Silicon.
 OFFICIAL_HOSTS = {
     'www.python.org': 'CPython',
     'files.pythonhosted.org': 'PyPI',
     'www.gyan.dev': 'FFmpeg for Windows, linked from ffmpeg.org',
     'github.com/GyanD/codexffmpeg/': "gyan.dev's own GitHub mirror, linked from gyan.dev",
     'evermeet.cx': 'FFmpeg for macOS, linked from ffmpeg.org',
+    'ffmpeg.martin-riedl.de/download/macos/arm64/': 'native Apple Silicon FFmpeg. NOT linked from ffmpeg.org, which '
+                                                    'links to no Apple Silicon build; chosen by the project owner '
+                                                    'on 6 October 2026 and pinned by checksum',
     'github.com/astral-sh/python-build-standalone/': "python-build-standalone's own releases",
+    'github.com/BtbN/FFmpeg-Builds/': 'FFmpeg static builds for Linux, linked from ffmpeg.org',
     'github.com/ultralytics/assets/': "Ultralytics' own releases",
 }
 
@@ -189,7 +194,8 @@ def download_urls(value):
 
 
 class TestDownloadSources:
-    """Only official sources: a download from anywhere else is a release blocker, however well its checksum matches."""
+    """Only the sources listed above: a download from anywhere else is a release blocker, however well its checksum
+    matches."""
 
     @pytest.mark.parametrize('manifest', [WINDOWS / 'downloads.json', MAC / 'downloads.json'], ids=['windows', 'mac'])
     def test_every_download_address_is_an_official_source(self, manifest):
@@ -300,17 +306,131 @@ class TestMacScriptsRun:
         assert 'needs macOS 13' in result.stdout and '12.7.4' in result.stdout
         assert not (folder / '.downloads').exists(), 'nothing is created or downloaded'
 
-    def test_apple_silicon_without_rosetta_is_told_how_before_anything_downloads(self, tmp_path):
-        """The macOS FFmpeg builds are Intel programs; without Rosetta they fail with no useful message."""
+    # --- which FFmpeg a Mac gets: Homebrew's, then one built for Apple Silicon, then the Intel one through Rosetta ---
+    FAKE_TOOL = ('#!/bin/bash\n{mark}\ncase "$1 $2" in\n'
+                 '  "-version "*) echo "{name} version 9.0.2 Copyright" ;;\n'
+                 '  "-hide_banner -encoders") echo " V....D {encoder}  H.264" ;;\n'
+                 '  "-hide_banner -hwaccels") echo "Hardware acceleration methods:"; echo videotoolbox ;;\n'
+                 'esac\n')
+
+    def fake_tools(self, folder, native=True, encoder='libx264'):
+        """A pretend ffmpeg and ffprobe. ``native``: marked as built for Apple Silicon (see ``choose_ffmpeg``)."""
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in ('ffmpeg', 'ffprobe'):
+            (folder / name).write_text(self.FAKE_TOOL.format(name=name, encoder=encoder,
+                                                             mark='# BUILT-FOR-ARM64' if native else '# intel'),
+                                       newline='\n')
+        return folder
+
+    def choose_ffmpeg(self, tmp_path, *, homebrew=None, native_download=None, rosetta=True, arch='arm64'):
+        """Run setup.sh's own FFmpeg section, with stand-ins for the Mac and for the downloads.
+
+        ``homebrew``: a folder of tools to pretend Homebrew installed. ``native_download``: a folder of tools the
+        Apple Silicon download would unpack to, or None for a download that fails. Whether a program is built for
+        Apple Silicon is read from a mark in the pretend tool, since the real test (`file`) cannot be faked here.
+        """
+        import zipfile
+        text = (MAC / 'setup.sh').read_text(encoding='utf-8')
+        section = text[text.index('ffmpeg_minimum=7'):text.index('# --- the person detector')]
+        functions, logic = section[:section.index('ffmpeg_from=""')], section[section.index('ffmpeg_from=""'):]
         folder = tmp_path / 'package'
-        folder.mkdir()
-        shutil.copy2(MAC / 'setup.sh', folder / 'setup.sh')
-        shims = self.stand_ins(tmp_path)
-        (shims / 'arch').write_text('#!/bin/bash\nexit 1\n', newline='\n')
-        result = self.run('setup.sh', shims, cwd=folder)
+        (folder / '.downloads').mkdir(parents=True)
+        (folder / 'bin').mkdir()
+        shims = self.stand_ins(tmp_path, arch=arch)
+        (shims / 'arch').write_text(f'#!/bin/bash\nexit {0 if rosetta else 1}\n', newline='\n')
+        (shims / 'curl').write_text('#!/bin/bash\nexit 22\n', newline='\n')   # the Intel download: not reachable here
+        if homebrew is not None:
+            prefix = homebrew.parent
+            (prefix / 'Cellar').mkdir(exist_ok=True)
+            (shims / 'brew').write_text('#!/bin/bash\ncygpath -u "$BREW_PREFIX"\n', newline='\n')
+        archives = tmp_path / 'archives'
+        archives.mkdir()
+        if native_download is not None:
+            for name in ('ffmpeg', 'ffprobe'):
+                with zipfile.ZipFile(archives / f'{name}-9.0.2-arm64.zip', 'w') as archive:
+                    archive.write(native_download / name, name)
+        stubs = ('set -euo pipefail\n'
+                 f'arch={arch}\nrepair=0\n'
+                 'python_field() { case "$1" in\n'
+                 '  *native_arm64.ffmpeg.filename) echo ffmpeg-9.0.2-arm64.zip ;;\n'
+                 '  *native_arm64.ffprobe.filename) echo ffprobe-9.0.2-arm64.zip ;;\n'
+                 '  *.filename) echo intel.zip ;;\n'
+                 '  *.sha256) echo pinned ;;\n'
+                 '  *.urls) echo https://example.invalid/file.zip ;;\n'
+                 'esac; }\n'
+                 'need() { echo "asked for $1" >> asked.log; local found="$(cygpath -u "$ARCHIVES")/$1"; '
+                 '[ -f "$found" ] || exit 1; echo "$found"; }\n')
+        mark = 'native_program() { if [ "$arch" != arm64 ]; then return 0; fi; grep -q BUILT-FOR-ARM64 "$1"; }\n'
+        (folder / 'try.sh').write_text(stubs + functions + mark + logic, newline='\n')
+        env = dict(os.environ, SHIMS=str(shims), ARCHIVES=str(archives),
+                   BREW_PREFIX=str(homebrew.parent) if homebrew is not None else '')
+        wrapper = 'export PATH="$(cygpath -u "$SHIMS"):$PATH"; exec bash "$0" "$@"'
+        result = subprocess.run([BASH, '-c', wrapper, 'try.sh'], cwd=folder, env=env, capture_output=True, text=True,
+                                creationflags=NO_WINDOW, timeout=120)
+        asked = (folder / 'asked.log').read_text() if (folder / 'asked.log').exists() else ''
+        return result, asked, folder
+
+    def test_homebrews_ffmpeg_is_used_when_it_is_there(self, tmp_path):
+        homebrew = self.fake_tools(tmp_path / 'brew' / 'bin')
+        result, asked, folder = self.choose_ffmpeg(tmp_path, homebrew=homebrew)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'FFmpeg is Homebrew' in result.stdout
+        assert not asked, 'nothing is downloaded when Homebrew already has it'
+        assert (folder / 'bin' / 'ffmpeg').exists() and (folder / 'bin' / 'ffprobe').exists()
+
+    def test_without_homebrew_apple_silicon_gets_the_build_made_for_it(self, tmp_path):
+        download = self.fake_tools(tmp_path / 'download')
+        result, asked, folder = self.choose_ffmpeg(tmp_path, native_download=download)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'FFmpeg is the Apple Silicon build from ffmpeg.martin-riedl.de' in result.stdout
+        assert 'ffmpeg-9.0.2-arm64.zip' in asked and 'ffprobe-9.0.2-arm64.zip' in asked
+        assert 'BUILT-FOR-ARM64' in (folder / 'bin' / 'ffmpeg').read_text()
+        assert 'Rosetta' not in result.stdout, 'Rosetta is not asked for when the native build works'
+
+    def test_an_intel_ffmpeg_in_homebrew_is_passed_over_on_apple_silicon(self, tmp_path):
+        homebrew = self.fake_tools(tmp_path / 'brew' / 'bin', native=False)
+        download = self.fake_tools(tmp_path / 'download')
+        result, asked, _folder = self.choose_ffmpeg(tmp_path, homebrew=homebrew, native_download=download)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'FFmpeg is the Apple Silicon build' in result.stdout and 'Homebrew' not in result.stdout
+
+    def test_an_ffmpeg_without_the_encoder_the_app_needs_is_passed_over(self, tmp_path):
+        homebrew = self.fake_tools(tmp_path / 'brew' / 'bin', encoder='libopenh264')
+        download = self.fake_tools(tmp_path / 'download')
+        result, _asked, _folder = self.choose_ffmpeg(tmp_path, homebrew=homebrew, native_download=download)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'FFmpeg is the Apple Silicon build' in result.stdout
+
+    def test_when_the_native_build_fails_the_intel_one_is_tried_and_rosetta_is_asked_for_only_then(self, tmp_path):
+        result, asked, _folder = self.choose_ffmpeg(tmp_path, rosetta=False)
         assert result.returncode == 1
+        assert 'ffmpeg-9.0.2-arm64.zip' in asked, 'the native build was tried first'
+        assert 'Using the Intel build instead' in result.stdout
         assert 'Rosetta 2' in result.stdout and 'softwareupdate --install-rosetta' in result.stdout
-        assert not (folder / '.downloads').exists(), 'nothing is created or downloaded'
+
+    def test_with_rosetta_the_fallback_goes_on_to_the_intel_download(self, tmp_path):
+        result, _asked, _folder = self.choose_ffmpeg(tmp_path, rosetta=True)
+        assert 'Using the Intel build instead' in result.stdout
+        assert 'softwareupdate --install-rosetta' not in result.stdout
+        assert 'Downloading intel.zip' in result.stdout, 'it went on to the Intel build'
+
+    def test_an_intel_mac_is_never_offered_the_apple_silicon_build(self, tmp_path):
+        result, asked, _folder = self.choose_ffmpeg(tmp_path, arch='x86_64', native_download=None)
+        assert not asked and 'Apple Silicon' not in result.stdout
+        assert 'Downloading intel.zip' in result.stdout
+
+    def test_setup_no_longer_stops_for_rosetta_before_it_has_tried_anything(self):
+        text = (MAC / 'setup.sh').read_text(encoding='utf-8')
+        assert text.index('rosetta_ready; then') > text.index('if native_pair; then')
+        assert text.count('softwareupdate --install-rosetta') == 1
+
+    def test_the_native_build_is_pinned_and_the_real_check_reads_the_program(self):
+        import json
+        native = json.loads((MAC / 'downloads.json').read_text(encoding='utf-8'))['ffmpeg']['native_arm64']
+        for tool in ('ffmpeg', 'ffprobe'):
+            assert len(native[tool]['sha256']) == 64 and native[tool]['urls'][0].endswith(f'/{tool}.zip')
+            assert '/macos/arm64/' in native[tool]['urls'][0]
+        assert '/usr/bin/file -L "$1"' in (MAC / 'setup.sh').read_text(encoding='utf-8')
 
     def test_a_download_moves_on_when_one_source_gives_the_wrong_file(self, tmp_path):
         """need(), lifted out of setup.sh as it is, with a curl that serves a wrong file from the first address."""
@@ -358,7 +478,7 @@ class TestMacScriptsRun:
         result = self.run('try.sh', self.stand_ins(tmp_path), cwd=folder)
         assert result.stdout.strip() == ('usable' if usable else 'refused'), result.stderr
 
-    def test_the_mac_ffmpeg_download_is_not_pinned_to_one_build(self):
+    def test_the_intel_mac_ffmpeg_download_is_not_pinned_to_one_build(self):
         import json
         manifest = json.loads((MAC / 'downloads.json').read_text(encoding='utf-8'))
         tools = [entry for arch in ('arm64', 'x86_64') for entry in manifest['ffmpeg'][arch].values()]

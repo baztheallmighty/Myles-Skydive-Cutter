@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.7.0 (October 2026)
+
+Clearer choices, a window that fits smaller screens, and a note when a newer version is out.
+
+- **The three choices are renamed and explained.** *Trim my video* is for the end of the day: each video cut down
+  to the jump so it takes less space. *A grade video* is the best video, with someone close to the camera;
+  *B grade video* is not as good, for when A grade is not enough. Their folders keep their names (`Trimmed`,
+  `A grade`, `B grade`).
+- **A grade can leave out the exit.** *Include the exit* is ticked to begin with; untick it if you end up with
+  more exits than you want, and A grade starts at freefall. B grade always includes the exit.
+- **The seconds on the Basic screen are no longer limited to 10.** Seconds before exit, and seconds either side
+  of the landing, can be as large as you like.
+- **How video is chosen in basic mode.** A button at the top right of the Process tab lists the rules that are not settings:
+  the parts of a jump never go backwards (so nothing after the exit can be "inside the plane", and only one jump
+  is found in each video), sound may only make freefall longer, the people count includes you, and the order in
+  which matches become clips.
+- **The window fits a 1080p screen at any scaling.** It used to refuse to be smaller than 1120 by 720, which is
+  taller than a 1080p laptop screen scaled to 150% has room for, so the bottom of the window was cut off. It can
+  now be as small as 950 by 460, never opens larger than its screen, and on a short window the log gives its room
+  to the settings. At 125% scaling the whole Basic screen shows without scrolling.
+- **A note when a newer version is out.** At start-up the app asks GitHub for the latest version number; if yours
+  is older, a line at the top says so, with a button that opens the download page. Nothing is installed for you,
+  nothing about your PC or videos is sent, and Advanced settings > Processing switches it off. This is the one
+  network connection the app makes after setup.
+- **Check for updates**, at the top right, asks on the spot and tells you the answer either way.
+- **Ctrl+Shift+D** saves a diagnostics file to send with a problem report.
+- **A first Linux package**, `Skydive-Cutter-2.7.0-linux.zip`, for 64-bit Intel and AMD PCs: unzip it and run
+  `bash ./skydive-cutter.sh`. It installs into its own folder without a root password, uses an NVIDIA card when
+  there is one, and uses the FFmpeg already on the system when that is version 7 or newer. It has not yet been
+  run on Linux; see its README.
+- **Apple Silicon Macs get an FFmpeg built for them.** Until now every Mac got the Intel build, which an Apple
+  Silicon Mac runs through Rosetta 2. Setup now uses Homebrew's FFmpeg if you already have it, otherwise a
+  native build from ffmpeg.martin-riedl.de pinned by checksum, and only falls back to the Intel build (and asks
+  for Rosetta 2) if neither works. Intel Macs use Homebrew's if it is there and are otherwise unchanged.
+- **On a Mac:** the window uses the Mac's own font, and on *Run on: Automatic* the person detector now uses the
+  Apple GPU where it used to stay on the processor. If the detector cannot run there it says so in the log and
+  uses the processor.
+
+No change to results on Windows: nothing is reprocessed.
+
 ## 2.6.0 (October 2026)
 
 - **An installer.** `Skydive-Cutter-2.6.0-Setup.exe` installs the app for you alone (no administrator rights), adds

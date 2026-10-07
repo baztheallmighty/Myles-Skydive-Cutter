@@ -158,6 +158,21 @@ class TestDeviceNames:
         assert system.describe_device(device) == name
 
 
+class TestThePersonDetectorsDevice:
+    def test_automatic_on_apple_silicon_names_the_apple_gpu(self, monkeypatch):
+        monkeypatch.setattr(system, 'best_device', lambda: 'mps')
+        assert system.people_device('auto') == 'mps'
+
+    def test_automatic_elsewhere_is_left_to_the_detector(self, monkeypatch):
+        for best in ('cuda', 'cpu'):
+            monkeypatch.setattr(system, 'best_device', lambda best=best: best)
+            assert system.people_device('auto') is None
+
+    def test_a_choice_made_by_hand_is_kept(self, monkeypatch):
+        monkeypatch.setattr(system, 'best_device', lambda: 'mps')
+        assert system.people_device('cpu') == 'cpu' and system.people_device('cuda') == 'cuda'
+
+
 class TestNothingElseAsks:
     def test_the_app_does_not_reach_for_the_platform_itself(self):
         """Platform choices belong in app/system.py, so a Mac build changes one file, not twenty."""

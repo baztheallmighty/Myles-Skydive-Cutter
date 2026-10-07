@@ -36,16 +36,6 @@ if [ "${macos%%.*}" -lt 13 ] 2>/dev/null; then
   exit 1
 fi
 
-# FFmpeg comes from the macOS build site ffmpeg.org links to, which builds for Intel only. Apple Silicon runs those
-# programs through Rosetta 2, and a command-line program without it just fails, so check before downloading.
-if [ "$arch" = arm64 ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
-  echo "This Mac needs Apple's Rosetta 2 for FFmpeg, and it is not installed yet."
-  echo "Install it by pasting this into Terminal and pressing Return (macOS may ask for your password):"
-  echo "  softwareupdate --install-rosetta"
-  echo "Then run setup again."
-  exit 1
-fi
-
 mkdir -p .downloads cache logs bin
 log="logs/setup-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$log") 2>&1
@@ -149,8 +139,14 @@ echo "Installing the model libraries from ${requirements}: a large download the 
 "$python" -m pip check
 
 # --- FFmpeg ------------------------------------------------------------------------------------------------
-# evermeet.cx, the macOS build site ffmpeg.org links to. A newer FFmpeg is fine (the app uses long-standing options
-# only), so setup accepts any copy that runs on this Mac and reports at least this version.
+# Which FFmpeg a Mac gets, best first:
+#   1. the one already in this folder, when it is the right kind for this Mac;
+#   2. Homebrew's, when Homebrew is installed and has one: built from FFmpeg's own source, and native on any Mac;
+#   3. on Apple Silicon, a native build from ffmpeg.martin-riedl.de, pinned by checksum;
+#   4. the Intel build from evermeet.cx, the macOS build site ffmpeg.org links to. An Intel Mac runs it as it is; an
+#      Apple Silicon Mac runs it through Rosetta 2, which works but is slower, so it is the last resort there.
+# A newer FFmpeg is fine (the app uses long-standing options only), so any copy that runs on this Mac and reports at
+# least this version is accepted.
 ffmpeg_minimum=7
 
 usable_tool() {  # usable_tool <program> <name> <minimum major version>  -> succeeds when it runs and is new enough
@@ -171,7 +167,110 @@ usable_tool() {  # usable_tool <program> <name> <minimum major version>  -> succ
   [ "$major" -ge "$minimum" ]
 }
 
+native_program() {  # native_program <program>  -> fails only for an Intel program on an Apple Silicon Mac
+  if [ "$arch" != arm64 ]; then return 0; fi
+  case "$(/usr/bin/file -L "$1" 2>/dev/null)" in
+    *arm64*) return 0 ;;
+  esac
+  return 1
+}
+
+capable_ffmpeg() {  # capable_ffmpeg <ffmpeg>  -> succeeds when it has the encoder and the Apple decoder the app uses
+  # Read into a variable first: with pipefail, a grep that stops reading early would make a good FFmpeg look bad.
+  local encoders
+  local decoders
+  encoders="$("$1" -hide_banner -encoders 2>/dev/null)" || return 1
+  decoders="$("$1" -hide_banner -hwaccels 2>/dev/null)" || return 1
+  case "$encoders" in
+    *libx264*) ;;
+    *) return 1 ;;
+  esac
+  case "$decoders" in
+    *videotoolbox*) return 0 ;;
+  esac
+  return 1
+}
+
+good_pair() {  # good_pair <folder>  -> succeeds when its ffmpeg and ffprobe are both the right kind for this Mac
+  usable_tool "$1/ffmpeg" ffmpeg "$ffmpeg_minimum" || return 1
+  usable_tool "$1/ffprobe" ffprobe "$ffmpeg_minimum" || return 1
+  native_program "$1/ffmpeg" || return 1
+  native_program "$1/ffprobe" || return 1
+  capable_ffmpeg "$1/ffmpeg"
+}
+
+homebrew_folder() {  # prints the folder holding Homebrew's FFmpeg when Homebrew is installed and has a good one
+  local prefix
+  for prefix in "$(brew --prefix 2>/dev/null || true)" /opt/homebrew /usr/local; do
+    if [ -z "$prefix" ] || [ ! -d "${prefix}/Cellar" ]; then continue; fi
+    if [ -x "${prefix}/bin/ffmpeg" ] && [ -x "${prefix}/bin/ffprobe" ] && good_pair "${prefix}/bin"; then
+      echo "${prefix}/bin"
+      return 0
+    fi
+  done
+  return 1
+}
+
+native_pair() {  # downloads the native Apple Silicon FFmpeg into .downloads/native; succeeds when both are good
+  local tool
+  local archive
+  local binary
+  rm -rf .downloads/native
+  mkdir -p .downloads/native
+  for tool in ffmpeg ffprobe; do
+    # need stops its own subshell when every address fails, which here means "try the next kind", not "stop setup".
+    archive="$(need "$(python_field "ffmpeg.native_arm64.${tool}.filename")" \
+                    "$(python_field "ffmpeg.native_arm64.${tool}.sha256")" \
+                    $(python_field "ffmpeg.native_arm64.${tool}.urls"))" || return 1
+    /usr/bin/unzip -q -o "$archive" -d ".downloads/native/${tool}-unpacked" || return 1
+    binary="$(find ".downloads/native/${tool}-unpacked" -type f -name "$tool" -print -quit)"
+    if [ -z "$binary" ]; then return 1; fi
+    chmod +x "$binary"
+    xattr -d com.apple.quarantine "$binary" 2>/dev/null || true
+    cp "$binary" ".downloads/native/${tool}"
+  done
+  good_pair .downloads/native
+}
+
+rosetta_ready() {
+  arch -x86_64 /usr/bin/true 2>/dev/null
+}
+
+ffmpeg_from=""
+if [ $repair = 0 ] && [ -x bin/ffmpeg ] && [ -x bin/ffprobe ] && good_pair bin; then
+  ffmpeg_from="already in this folder"
+fi
+if [ -z "$ffmpeg_from" ] && brew_bin="$(homebrew_folder)"; then
+  # Linked, not copied: Homebrew's FFmpeg loads other Homebrew packages, and stays current when Homebrew updates it.
+  # If Homebrew's copy is ever removed the link stops working, and the launcher runs this setup again.
+  rm -f bin/ffmpeg bin/ffprobe
+  ln -s "${brew_bin}/ffmpeg" bin/ffmpeg
+  ln -s "${brew_bin}/ffprobe" bin/ffprobe
+  ffmpeg_from="Homebrew, in ${brew_bin}"
+fi
+if [ -z "$ffmpeg_from" ] && [ "$arch" = arm64 ]; then
+  echo "Getting FFmpeg built for Apple Silicon."
+  if native_pair; then
+    rm -f bin/ffmpeg bin/ffprobe
+    cp .downloads/native/ffmpeg bin/ffmpeg
+    cp .downloads/native/ffprobe bin/ffprobe
+    ffmpeg_from="the Apple Silicon build from ffmpeg.martin-riedl.de"
+  else
+    echo "The Apple Silicon build of FFmpeg could not be downloaded or does not run here."
+    echo "Using the Intel build instead. It works through Apple's Rosetta 2, only more slowly."
+  fi
+  rm -rf .downloads/native
+fi
+if [ -z "$ffmpeg_from" ] && [ "$arch" = arm64 ] && ! rosetta_ready; then
+  echo "The Intel build of FFmpeg needs Apple's Rosetta 2, and it is not installed yet."
+  echo "Install it by pasting this into Terminal and pressing Return (macOS may ask for your password):"
+  echo "  softwareupdate --install-rosetta"
+  echo "Then run setup again."
+  exit 1
+fi
+
 for tool in ffmpeg ffprobe; do
+  if [ -n "$ffmpeg_from" ]; then break; fi
   if [ $repair = 0 ] && [ -x "bin/${tool}" ] && usable_tool "bin/${tool}" "$tool" "$ffmpeg_minimum"; then continue; fi
   filename="$(python_field "ffmpeg.${arch}.${tool}.filename")"
   urls="$(python_field "ffmpeg.${arch}.${tool}.urls")"
@@ -204,7 +303,11 @@ for tool in ffmpeg ffprobe; do
     exit 1
   fi
 done
+if [ -z "$ffmpeg_from" ]; then
+  ffmpeg_from="the Intel build from evermeet.cx$([ "$arch" = arm64 ] && echo ', through Rosetta 2' || true)"
+fi
 echo "FFmpeg: $(bin/ffmpeg -version 2>&1 | sed -n '1p')"
+echo "FFmpeg is ${ffmpeg_from}."
 
 # --- the person detector's model ------------------------------------------------------------------------------
 weights="yolo11n.pt"
@@ -220,11 +323,11 @@ export YOLO_CONFIG_DIR="${root}/cache/ultralytics"
 # --- prove it works ------------------------------------------------------------------------------------------
 "$python" -s -B verify_install.py --device "$device"
 
-"$python" - "$arch" "$device" <<'PYTHON'
+"$python" - "$arch" "$device" "$ffmpeg_from" <<'PYTHON'
 import json, sys, time
-arch, device = sys.argv[1], sys.argv[2]
+arch, device, ffmpeg_from = sys.argv[1], sys.argv[2], sys.argv[3]
 json.dump({'schema_version': 1, 'profile': f'macos-{arch}', 'python': f'.runtime/{arch}/python/bin/python3',
-           'device': device, 'installed_at': time.strftime('%Y-%m-%dT%H:%M:%S')},
+           'device': device, 'ffmpeg': ffmpeg_from, 'installed_at': time.strftime('%Y-%m-%dT%H:%M:%S')},
           open('installation.json', 'w'), indent=1)
 PYTHON
 "$python" -m pip freeze > "logs/installed-macos-${arch}.txt"

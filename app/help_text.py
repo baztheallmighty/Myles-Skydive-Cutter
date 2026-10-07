@@ -6,7 +6,7 @@ setting cannot be added without saying what it does (tests/app/test_help.py).
 Each entry is ``key: (label, help)``. Keys named after a ``Settings`` or ``KeepProfile`` field belong to that field.
 Help is plain text; a blank line starts a new paragraph.
 """
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from app.settings import KeepProfile, Settings
 
@@ -85,28 +85,45 @@ HELP = {
                'Used when clips are organised as "A folder per profile". Leave it empty for a folder named after '
                'the profile, inside your clips folder.\n\n'
                'Type a name to use a different folder inside the clips folder; two profiles can share one. Or type '
-               'a full path, such as D:\\Day tape, to put this profile\'s clips somewhere else entirely.'),
+               'a full path, such as D:\\Best of the day, to put this profile\'s clips somewhere else entirely.'),
 
     # --- basic mode: the three built-in choices --------------------------------------------------------------------
-    'basic_trim': ('Trim my footage',
-                   'Cuts each video down to the jump itself and throws nothing else away: your originals are never '
-                   'touched.\n\n'
-                   'Keeps exit, freefall, break-off and the opening, starting a couple of seconds before exit and '
-                   'ending when the canopy is open. It does not look for people, so it is the fastest choice.\n\n'
-                   'Tick the landing to get a second clip of the final approach and touchdown, with a few seconds '
-                   'either side.\n\nClips go into a "Trimmed" folder, named after each video.'),
-    'basic_a': ('A grade (day tape)',
-                'The good stuff: moments with at least 1 person in view filling at least 20% of the picture, from '
-                'exit to the end of break-off. Short drop-outs of up to 2 seconds are joined.\n\n'
-                'Tick canopy to also keep canopy flight with at least 2 people filling 20%. That count includes '
-                'you: your own legs or arms in the picture are one of the two.\n\n'
+    'basic_trim': ('Trim my video',
+                   'For the end of the day: you want to keep your jumps without keeping everything the camera '
+                   'recorded.\n\n'
+                   'Each video is cut down to the jump itself: exit, freefall, break-off and the opening. The clip '
+                   'starts a couple of seconds before exit and ends when the canopy is open. Time in the plane, '
+                   'canopy flight and the walk back are left out, so the clip is a fraction of the size of the '
+                   'original.\n\n'
+                   'It keeps the whole jump whether or not anyone is in view, and it does not look for people, so '
+                   'it is the fastest choice.\n\n'
+                   'Tick the landing to get a second clip of the final approach and touchdown. Both numbers can be '
+                   'as large as you like.\n\n'
+                   'Your original videos are never changed or deleted. Clips go into a "Trimmed" folder, named '
+                   'after each video.'),
+    'basic_a': ('A grade video',
+                'A grade and B grade are about how good the video is. A grade is the best of it: the moments where '
+                'at least 1 person is in view and fills at least 20% of the picture, from exit to the end of '
+                'break-off. Professional video shot by a cameraman would count as A grade.\n\n'
+                'If you are putting together a video of the day, start here. If A grade gives you enough, use '
+                'only that. If it does not, add B grade.\n\n'
+                'Include the exit: on exit everyone is in view until they let go, so nearly every jump gives an '
+                'exit clip. Untick it if you end up with more exits than you want; A grade then starts at '
+                'freefall.\n\n'
+                'Include canopy flight: also keeps canopy flight with at least 2 people filling 20%. That count '
+                'includes you: your own legs or arms in the picture are one of the two.\n\n'
+                'Drop-outs of up to 2 seconds are joined, moments shorter than 2 seconds are ignored, and each '
+                'clip gets 2 seconds extra at each end.\n\n'
                 'Clips go into an "A grade" folder, named after each video.'),
-    'basic_b': ('B grade',
-                'Everything A grade keeps, plus footage a wandering camera would lose: people need fill only 10% '
-                'of the picture, gaps of up to 6 seconds are joined, and gaps of up to 10 seconds are joined '
-                'while at least 3 people are still in view.\n\n'
-                'Clips go into a "B grade" folder, named after each video. Because B includes A, the same '
-                'freefall will be in both folders when both are ticked.'),
+    'basic_b': ('B grade video',
+                'Video that is not as good as A grade, for when A grade alone does not give you enough.\n\n'
+                'It keeps everything A grade keeps, plus video a wandering camera would lose: people need fill '
+                'only 10% of the picture, gaps of up to 6 seconds are joined, and gaps of up to 10 seconds are '
+                'joined while at least 3 people are still in view.\n\n'
+                'B grade always includes the exit, whatever A grade\'s exit tick says.\n\n'
+                'Each clip gets 2 seconds extra before and 3 seconds after. Clips go into a "B grade" folder, '
+                'named after each video. Because B includes A, the same freefall will be in both folders when '
+                'both are ticked.'),
 
     # --- advanced: output ------------------------------------------------------------------------------------------
     'cut_enabled': ('What to produce',
@@ -155,6 +172,12 @@ HELP = {
                         'On the Review tab, "Mark reviewed" and "Not skydiving" cut that video again straight '
                         'away from your labels.\n\nOff means your corrections are used the next time you click '
                         'Process videos.'),
+    'check_updates': ('Check for a newer version when the app starts',
+                      'Once at start-up the app asks GitHub, where Skydive Cutter is published, for the number of '
+                      'the latest version. If yours is older, a line at the top of the window says so, with a '
+                      'button that opens the download page.\n\n'
+                    'Nothing about your PC or your videos is sent, and nothing is downloaded or installed for '
+                      'you. Without an internet connection the app simply says nothing.'),
 
     # --- advanced: people ------------------------------------------------------------------------------------------
     'people_enabled': ('Look for people in the picture',
@@ -192,6 +215,199 @@ PHASES = {
     'landing': 'The final approach and touchdown.',
     'landed': 'On the ground after landing.',
 }
+
+# What the app does between "Process videos" and the clips appearing, said in one place behind one button. The numbers
+# are read from the built-in profiles, so the words cannot drift from what the app does.
+RULES_TITLE = 'How video is chosen in basic mode'
+STAGES = ('In the plane', 'Climbing out', 'Exit', 'Freefall', 'Break-off', 'Opening', 'Canopy flight', 'Landing',
+          'Landed')
+SOUND_EXTENDS_FREEFALL_SECONDS = 30   # cutter_v4.engine.AUDIO_FREEFALL_MAX_EXTENSION; a test keeps the two the same
+
+# The jump followed through every step at the end of the note. Times are seconds into a six-minute video.
+EXAMPLE_DURATION = 360
+EXAMPLE_STAGES = (('inside_plane', 0, 182), ('climbing_out', 182, 190), ('exit', 190, 196), ('freefall', 196, 245),
+                  ('break_off', 245, 250), ('opening_parachutes', 250, 255), ('canopy_flight', 255, 360))
+EXAMPLE_CLOSE = ((190, 194), (205, 220), (221, 238), (242, 243))   # when someone fills 20% or more of the picture
+
+
+def clock(seconds):
+    return f'{int(seconds) // 60}:{int(seconds) % 60:02d}'
+
+
+def seconds_word(value):
+    return f'{value:g} second' + ('' if value == 1 else 's')
+
+
+def rules():
+    """The note as blocks: ('title', words), ('text', words), ('list', [words]) or ('table', [(left, right)])."""
+    from app.settings import A_GRADE, B_GRADE, TRIM, built_in_profiles
+    built = built_in_profiles()
+    trim, a, b = built[TRIM], built[A_GRADE], built[B_GRADE]
+    stage_rows = [(f'{clock(start)} to {clock(end)}', PHASE_NAMES[phase]) for phase, start, end in EXAMPLE_STAGES[:-1]]
+    stage_rows.append((f'{clock(EXAMPLE_STAGES[-1][1])} to {clock(EXAMPLE_DURATION)}', 'Canopy flight, landing, landed'))
+    return [
+        ('text', 'This page explains what the app does to a video between you clicking Process videos and the clips '
+                 'appearing in your folder. It describes the three choices on the Basic screen. Advanced mode uses '
+                 'the same steps but gives you more control: you can build your own profiles and set every number '
+                 'mentioned below yourself.'),
+        ('text', 'There are four steps. The app labels each second of the video, counts the people in each second, '
+                 'decides which seconds each choice wants to keep, and then turns those seconds into clips.'),
+
+        ('title', 'Step 1: The app labels every second with a stage of the jump'),
+        ('text', 'The app watches the whole video and gives every second one label. There are nine labels, which we '
+                 'call stages:'),
+        ('list', [f'{number}. {name}' for number, name in enumerate(STAGES, 1)]),
+        ('text', 'To do this it uses three things: the picture, the sound, and the motion data that some cameras '
+                 'record (GoPro and DJI cameras, for example).'),
+        ('text', 'The stages only go forwards. A skydive always happens in the order above, so the app is not '
+                 'allowed to go back to an earlier stage. Once it has decided you have exited, no later second can '
+                 'be labelled "in the plane", even if the picture looks like the inside of a plane for a moment. '
+                 'Once your canopy is open, no later second can be labelled freefall. This rule stops the app from '
+                 'making silly mistakes, such as deciding you were in freefall for two seconds in the middle of '
+                 'your canopy ride.'),
+        ('text', 'A stage can be missing. If you press record after you have already left the plane, the video has '
+                 'no "in the plane", no "climbing out" and no "exit". That is fine. The app skips them and starts at '
+                 'freefall.'),
+        ('text', 'The app expects one jump per video. This follows from the forwards-only rule. If one file '
+                 'contains two jumps, the second jump would need the stages to start again from the beginning, '
+                 'which is not allowed. The app will find one of the jumps and get the other wrong. If your camera '
+                 'recorded two jumps in one file, split the file into two before processing it.'),
+        ('text', 'How sound is used. The picture is what decides the stages. Sound is allowed to change the answer '
+                 'in one situation only. If your camera does not record motion data, and the picture says freefall '
+                 'has ended but the sound of the wind says you are still falling, the app keeps freefall going for '
+                 f'up to {SOUND_EXTENDS_FREEFALL_SECONDS} more seconds. This is because, in testing, the picture '
+                 'sometimes ended freefall too early on these cameras.'),
+        ('text', 'In every other case, sound and motion are used only as a second opinion. If they disagree with '
+                 'the picture, the answer does not change, but the Review tab shows that part of the video in amber '
+                 'so you know where to look.'),
+        ('text', 'Break-off is the least exact stage. When exactly a group starts to break off is a matter of '
+                 'opinion, and two people watching the same video will often disagree by a second or two. So expect '
+                 'the end of freefall to be a second or two early or late. This is why each choice adds a little '
+                 'extra video at the end of every clip.'),
+
+        ('title', 'Step 2: The app counts the people in every second'),
+        ('text', 'Once a second, the app looks at the picture and finds the people in it. It draws a box around '
+                 'each person and records two numbers for that second:'),
+        ('list', ['How many people it found.',
+                  'How much of the picture they fill, as a percentage. This is the area of all the boxes added '
+                  'together.']),
+        ('text', 'To give you a feel for the second number: one person close to the camera fills about 20% of the '
+                 'picture. A jumper on the far side of a formation might fill only 1% to 3%.'),
+        ('text', 'You (the camera person) count as a person. Under canopy and on landing, your own legs and arms '
+                 'can be in shot, and the app counts them as one person. So "2 people in view" under canopy usually '
+                 'means you and one other.'),
+        ('text', 'The count of people never changes the classification of stages. Step 1 is finished before the '
+                 'people are looked at. The people count only decides which seconds of a stage are worth keeping.'),
+        ('text', 'Trim my video skips this step completely, because it does not care who is in the picture. That '
+                 'is why it is the fastest choice.'),
+
+        ('title', 'Step 3: Each choice decides which seconds match its criteria'),
+        ('text', 'The app now has, for every second, a stage and a people count. Each choice you ticked goes '
+                 'through the video and marks the seconds that match its criteria.'),
+        ('text', 'Trim my video matches every second that is in exit, freefall, break-off or opening. It does not '
+                 'look at people at all.'),
+        ('text', 'A grade video matches a second when both of these are true:'),
+        ('list', ['The second is in exit, freefall or break-off (or only freefall and break-off, if you unticked '
+                  '"Include the exit").',
+                  f'At least {a.min_person_count} person is in view and people fill at least '
+                  f'{a.min_total_area_percent:g}% of the picture.']),
+        ('text', 'B grade video uses the same stages as A grade, always with the exit included, but people only '
+                 f'need to fill {b.min_total_area_percent:g}% of the picture.'),
+
+        ('title', 'Step 4: The matching seconds are then turned into clips'),
+        ('text', 'The matching seconds are rarely one neat block. Someone drifts out of shot for a second, or the '
+                 'camera looks away. So the app tidies up, always in this order.'),
+        ('text', 'First, short gaps are filled in. This only matters for A grade and B grade. If there is matching '
+                 'video, then a short gap, then more matching video, the gap is filled so you get one clip instead '
+                 f'of two. A grade fills gaps of up to {seconds_word(a.max_gap_seconds)}. B grade fills gaps of up '
+                 f'to {seconds_word(b.max_gap_seconds)}, and up to {seconds_word(b.people_gap_seconds)} if at least '
+                 f'{b.people_gap_count} people stayed in view during the gap, even if they were small in the '
+                 'picture.'),
+        ('text', 'Trim my video has no gaps to fill: the stages it keeps always follow straight on from each '
+                 'other, so it is always one clip.'),
+        ('text', 'A gap is only filled when there is matching video on both sides of it. Filling gaps never makes '
+                 'a clip start earlier or end later.'),
+        ('text', 'Second, short matches that stand alone are dropped (A grade and B grade only). After the gaps '
+                 f'are filled, anything still shorter than {seconds_word(a.min_span_seconds)} is thrown away. This '
+                 'only removes a brief glimpse of someone with nothing else near it. A run of short matches close '
+                 'together has already been joined into one longer match by the first step, so it is kept.'),
+        ('text', 'Third, extra seconds are added to each end. This gives each clip a lead-in and covers the '
+                 f'uncertainty about where break-off ends. A grade adds {seconds_word(a.margin_before_seconds)} '
+                 f'before and {a.margin_after_seconds:g} after. B grade adds {b.margin_before_seconds:g} before and '
+                 f'{b.margin_after_seconds:g} after. Trim my video adds the seconds you chose before the exit, and '
+                 f'{seconds_word(trim.margin_after_seconds)} after the canopy is open.'),
+        ('text', 'Fourth, clips that now touch are joined. If adding the extra seconds makes two clips overlap, or '
+                 'leaves them less than a second apart, they become one clip.'),
+        ('text', 'Last, the clip is cut from your original video. The app copies that part of the file without '
+                 're-encoding it. This is quick, and the clip has exactly the quality of your original. The one '
+                 'side effect is that a copy can only begin at certain frames in the original, called keyframes. So '
+                 'a clip may start a second or two earlier than the app planned. It is never shorter than planned.'),
+
+        ('title', 'An example'),
+        ('text', f'Say you film a 4-way and the video is {EXAMPLE_DURATION // 60} minutes long. The app labels it '
+                 'like this:'),
+        ('table', stage_rows),
+        ('text', f'Trim my video keeps exit through opening, {clock(190)} to {clock(255)}. With '
+                 f'{seconds_word(trim.margin_before_seconds)} added before and {trim.margin_after_seconds:g} after, '
+                 f'you get one clip from {clock(188)} to {clock(256)}. A {EXAMPLE_DURATION // 60} minute video has '
+                 'become a 68 second clip.'),
+        ('text', 'A grade video also looks at the people. Suppose someone is close to the camera (filling 20% or '
+                 'more of the picture) at these times:'),
+        ('list', [f'{clock(190)} to {clock(194)}, on the exit', f'{clock(205)} to {clock(220)}',
+                  f'{clock(221)} to {clock(238)}', f'{clock(242)} to {clock(243)}']),
+        ('text', 'Here is what happens:'),
+        ('list', [f'The gap between {clock(220)} and {clock(221)} is 1 second, so it is filled. That gives one '
+                  f'match from {clock(205)} to {clock(238)}.',
+                  f'The gap between {clock(194)} and {clock(205)} is 11 seconds, which is too long to fill. The '
+                  'exit stays separate.',
+                  f'The match at {clock(242)} lasts 1 second and stands alone, so it is dropped.',
+                  'Two seconds are added to each end of what is left.']),
+        ('text', f'You get two clips: {clock(188)} to {clock(196)} (the exit) and {clock(203)} to {clock(240)} '
+                 '(the freefall). If you had unticked "Include the exit", you would get only the second one.'),
+        ('text', 'B grade video would give you more from the same jump, because people only need to fill '
+                 f'{b.min_total_area_percent:g}% of the picture and longer gaps are filled.'),
+
+        ('title', 'The exact numbers for each choice'),
+    ]
+
+
+PHASE_NAMES = {'inside_plane': 'In the plane', 'climbing_out': 'Climbing out', 'exit': 'Exit',
+               'freefall': 'Freefall', 'break_off': 'Break-off', 'opening_parachutes': 'Opening',
+               'canopy_flight': 'Canopy flight', 'landing': 'Landing', 'landed': 'Landed'}
+
+
+# The opening sentences that are the points being made; the note shows them in bold.
+RULE_LEADS = ('The stages only go forwards.', 'A stage can be missing.', 'The app expects one jump per video.',
+              'How sound is used.', 'Break-off is the least exact stage.',
+              'You (the camera person) count as a person.',
+              'The count of people never changes the classification of stages.',
+              'First, short gaps are filled in.',
+              'Second, short matches that stand alone are dropped (A grade and B grade only).',
+              'Third, extra seconds are added to each end.', 'Fourth, clips that now touch are joined.',
+              'Last, the clip is cut from your original video.')
+
+
+def rules_text():
+    """The note as plain text, a blank line between blocks."""
+    said = []
+    for kind, content in rules():
+        if kind == 'list':
+            said.append('\n'.join(content))
+        elif kind == 'table':
+            said.append('\n'.join(f'{left}: {right}' for left, right in content))
+        else:
+            said.append(content)
+    return '\n\n'.join(said)
+
+
+def built_in_choices():
+    """[(title, what it keeps)] for each built-in choice, read from the profiles themselves so it cannot drift."""
+    from app.settings import A_CANOPY, A_GRADE, B_GRADE, LANDING, TRIM, built_in_profiles
+    built = built_in_profiles()
+    return [(title, profile_summary(replace(built[name], enabled=True)))
+            for title, name in ((label('basic_trim'), TRIM), ('Its landing', LANDING), (label('basic_a'), A_GRADE),
+                                ('Its canopy flight', A_CANOPY), (label('basic_b'), B_GRADE))]
+
 
 # Settings that are not shown as a control of their own, so they need no help entry.
 UNSEEN = {'poll_seconds', 'window_geometry', 'column_state', 'open_sections', 'mode', 'advanced_enabled'}

@@ -269,17 +269,47 @@ class TestTheBasicScreen:
         assert LANDING not in in_use(built.read_settings()), 'the landing goes with trimming'
         built.close()
 
-    def test_the_seconds_are_written_into_the_profiles_and_stop_at_ten(self, basic):
+    def test_the_seconds_are_written_into_the_profiles_however_many(self, basic):
         build, _clips = basic
         built, _application = build()
-        built.trim_before.setValue(4.0)
+        built.trim_before.setValue(45.0)
         built.trim_landing.setChecked(True)
-        built.landing_seconds.setValue(25.0)
+        built.landing_seconds.setValue(120.0)
         by_name = {profile.name: profile for profile in built.read_settings().profiles}
-        assert by_name[TRIM].margin_before_seconds == 4.0
-        assert by_name[LANDING].margin_before_seconds == by_name[LANDING].margin_after_seconds == 10.0
+        assert by_name[TRIM].margin_before_seconds == 45.0
+        assert by_name[LANDING].margin_before_seconds == by_name[LANDING].margin_after_seconds == 120.0
         assert not built.customised(TRIM), 'its own seconds are not a change to the built-in choice'
         built.close()
+
+    def test_long_seconds_come_back_as_they_were_saved(self, basic):
+        build, _clips = basic
+        built, _application = build()
+        built.trim_before.setValue(45.0)
+        built.trim_landing.setChecked(True)
+        built.landing_seconds.setValue(120.0)
+        saved = built.read_settings()
+        built.close()
+        again, _application = build(saved)
+        assert again.trim_before.value() == 45.0 and again.landing_seconds.value() == 120.0
+        again.close()
+
+    def test_a_grade_keeps_the_exit_until_it_is_unticked(self, basic):
+        build, _clips = basic
+        built, _application = build()
+        built.cards[A_GRADE]['tick'].setChecked(True)
+        built.cards[B_GRADE]['tick'].setChecked(True)
+        assert built.a_exit.isChecked() and 'exit' in built.profile_named(A_GRADE).phases
+        built.a_exit.setChecked(False)
+        assert built.profile_named(A_GRADE).phases == frozenset({'freefall', 'break_off'})
+        assert 'exit' in built.profile_named(B_GRADE).phases, 'the tick is A grade\'s alone'
+        assert not built.customised(A_GRADE), 'its own tick is not a change to the built-in choice'
+        saved = built.read_settings()
+        built.close()
+        again, _application = build(saved)
+        assert not again.a_exit.isChecked()
+        again.a_exit.setChecked(True)
+        assert again.profile_named(A_GRADE) == replace(built_in_profiles()[A_GRADE], enabled=True)
+        again.close()
 
     def test_nothing_ticked_does_not_start(self, basic):
         build, _clips = basic

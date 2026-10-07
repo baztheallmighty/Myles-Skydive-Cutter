@@ -84,7 +84,7 @@ towards it.
 ## "People detection is not installed" in red
 
 The detector or its model file is missing, so the app will not process with people filters in your profiles. Click
-**Install now** in the banner, or run `Repair.cmd`. If you would rather cut on phases alone, use **Trim my footage**
+**Install now** in the banner, or run `Repair.cmd`. If you would rather cut on phases alone, use **Trim my video**
 on the Basic screen, which does not look for people, or on the Advanced screen set every profile's **People in view**
 and **People fill** to 0.
 
@@ -109,7 +109,7 @@ another part of the jump, nobody found, too few people, people too small, or a m
 - **Nobody was found.** Distant jumpers and people seen from behind are the detector's weak spot. Try a larger
   **Person detector**, or lower **People fill at least**.
 - **People were found but are small in the picture.** One person at 3% does not pass a profile that asks for 20%.
-  B grade asks for 10%; Trim my footage asks for nobody.
+  B grade asks for 10%; Trim my video asks for nobody.
 - **The matches are short and scattered.** Raise **Join matches separated by up to**, or use **Join gaps while people
   are still in view**, or lower **Ignore matches shorter than**.
 - **No jump was found** in the video (a ground video, or one that starts under canopy).
@@ -166,7 +166,7 @@ processor instead (slower but reliable). Errors about missing model files mean t
 - Most of the time goes on reading the video, and 4K at 60 frames a second is eight times the work of 1080p at 30.
   **Read videos with: Automatic** uses the graphics card for this when it can; check it has not been left on
   Processor only.
-- **Trim my footage** on its own is the quickest choice, because it does not look for people.
+- **Trim my video** on its own is the quickest choice, because it does not look for people.
 - A larger **Person detector** is slower.
 - The log shows how long each step took for every video, which says where the time goes on your PC.
 

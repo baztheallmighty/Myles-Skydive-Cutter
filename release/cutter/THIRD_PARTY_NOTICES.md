@@ -38,7 +38,12 @@ audio and motion models were trained from scratch on that footage. No third-part
 | PySide6 / Qt 6.9 | pypi.org | LGPL-3.0 |
 | Pillow, requests, urllib3, certifi, idna, charset-normalizer, and the other dependencies listed in the `requirements-*.txt` lock files | pypi.org | Their respective permissive licences (see each `.dist-info`) |
 | FFmpeg 8.1.2 "essentials" build (Windows) | gyan.dev, linked from ffmpeg.org | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
-| FFmpeg 9.0.2 static build (macOS) | evermeet.cx, linked from ffmpeg.org | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
+| FFmpeg 9.0.2 static build (macOS, Intel; the last resort on Apple Silicon) | evermeet.cx, linked from ffmpeg.org | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
+| FFmpeg 9.0.2 build (macOS, Apple Silicon) | ffmpeg.martin-riedl.de | Includes GPL components such as x264 and x265, so the GPL applies to the build. Used as a separate program, not linked. |
+| FFmpeg 9.0 static "gpl" build (Linux, when the system has no suitable FFmpeg) | BtbN/FFmpeg-Builds, linked from ffmpeg.org | GPL-3.0 (includes GPL components such as x264). Used as a separate program, not linked. |
+| FFmpeg already on a Linux system (when version 7 or newer) | The person's own distribution; never installed or changed by setup | As the distribution provides it. Used in place as a separate program; not copied or redistributed. |
+| NVIDIA CUDA 12.6 libraries (Linux only; the `nvidia-*-cu12` packages PyTorch requires) and Triton | PyPI | NVIDIA's own licence terms for each package (see each package's licence file after install); Triton is MIT. Downloaded on the person's PC, not shipped in the ZIP. |
+| FFmpeg from Homebrew (macOS, when already installed) | The person's own Homebrew; never installed or changed by setup | As Homebrew distributes it. Used in place as a separate program; not copied or redistributed. |
 
 ## Person detection (installed by setup)
 

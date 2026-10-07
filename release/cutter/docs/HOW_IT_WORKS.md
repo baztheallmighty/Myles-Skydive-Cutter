@@ -13,7 +13,9 @@ stop before landing):
 **inside plane → climbing out → exit → freefall → break-off → opening parachutes → canopy flight → landing → landed**
 
 The classifier never lets the phases go backwards. It finds the most likely sequence that respects this order
-(*ordered decoding*), so it cannot, for example, put freefall after canopy flight.
+(*ordered decoding*), so it cannot, for example, put freefall after canopy flight, or "inside plane" after the exit.
+The same rule means it expects one jump in each video: a second jump in the same file would have to go backwards,
+so only one is found. The app lists this and its other fixed rules behind **How video is chosen in basic mode** on the Process tab.
 
 ## Three sources
 
@@ -66,7 +68,7 @@ wearer's own limbs. People never change the phases: they only decide which secon
 Each profile tests every second against its parts of the jump and its people numbers, joins matches separated by short
 gaps, drops matches that are too short, and adds the extra footage at each end. The exact order is in the
 [Output and CSV reference](OUTPUT_REFERENCE.md#how-matching-becomes-clips), and the Review tab's **Why not kept** row
-shows the outcome second by second. Trim my footage, A grade and B grade are profiles like any other.
+shows the outcome second by second. Trim my video, A grade and B grade are profiles like any other.
 
 ## Doing several videos at once
 

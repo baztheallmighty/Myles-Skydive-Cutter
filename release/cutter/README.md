@@ -1,7 +1,7 @@
 # Skydive Cutter
 
 Point it at a folder of skydiving videos and it finds the jump in each one and cuts out the part you want: the whole
-jump trimmed of the plane ride and the walk back, or only the footage with people close enough for a day tape. It
+jump trimmed of the plane ride and the walk back, or only the best video, with people close to the camera. It
 runs entirely on your own Windows PC: after the one-time setup it needs no internet, and your videos never leave
 your computer.
 
@@ -19,8 +19,8 @@ For every video in the folder you choose (subfolders included), Skydive Cutter:
    - **Camera motion:** the accelerometer data that GoPro (HERO5 and later, MAX) and recent DJI cameras record
      inside the file. It shows the exit's weightless moment, the opening shock and the landing.
 2. **Counts the people in view**, second by second, and how much of the picture they fill.
-3. **Cuts clips** for each thing you asked it to keep. The Basic screen has three choices: **Trim my footage** (the
-   jump itself), **A grade** (someone close in view, for a day tape) and **B grade** (looser). The Advanced screen
+3. **Cuts clips** for each thing you asked it to keep. The Basic screen has three choices: **Trim my video** (the
+   jump itself), **A grade video** (the best: someone close in view) and **B grade video** (not as good, for when A grade is not enough). The Advanced screen
    has *keep profiles* you can build yourself. Cutting copies the original video data, so it is fast and loses no
    quality.
 4. **Writes a CSV timeline** for each video: the phase at every second, whether the other sources agreed, the people
@@ -66,13 +66,14 @@ Break-off is the hardest moment to place, for people as well as for the model. S
 - About **20 GB free** for the NVIDIA setup, or 8 GB for the processor-only setup.
 - An **NVIDIA graphics card** is recommended: GTX 900 series or newer, with a current driver. Without one it still
   works on the processor, just more slowly.
-- Internet for the one-time setup only.
+- Internet for the one-time setup only. After that the app works without it (it asks once at start-up whether a
+  newer version is out, and says nothing if it cannot).
 
 ## Install
 
 ### With the installer (easiest)
 
-1. Download `Skydive-Cutter-2.6.0-Setup.exe` and run it. Windows will say the publisher is unknown, because this
+1. Download `Skydive-Cutter-2.7.0-Setup.exe` and run it. Windows will say the publisher is unknown, because this
    free project does not buy a code-signing certificate: choose **More info**, then **Run anyway**.
 2. Click through. It installs for you alone, needs no administrator rights, and then opens a window that downloads
    what the app runs on (Python, the AI libraries, the person detector and FFmpeg). With an NVIDIA card that is
@@ -89,7 +90,7 @@ If the download in step 2 is interrupted, just start the app: it says what is mi
 
 ### From the ZIP (no installer)
 
-1. Download `Skydive-Cutter-2.6.0-windows.zip`. Right-click it and choose **Extract All** into a short, normal folder,
+1. Download `Skydive-Cutter-2.7.0-windows.zip`. Right-click it and choose **Extract All** into a short, normal folder,
    for example `C:\SkydiveCutter`. Not inside the ZIP, not in Program Files, and not in a OneDrive folder (Desktop,
    Documents and Downloads often are): OneDrive would upload the 10 GB the app installs. Setup checks both, and also
    stops if the folder's path is too long for Windows (over 100 characters).
@@ -121,10 +122,12 @@ The app opens on the **Basic** screen.
 1. **Videos to process:** the folder with your jump videos. Its subfolders are included. **Save clips to:** where the
    clips go, outside the videos folder. You can drag folders from Explorer onto these boxes.
 2. Tick what you want. Any or all run together, each into its own folder:
-   - **Trim my footage:** the jump itself, from just before the exit until the canopy is open, whoever is in view.
+   - **Trim my video:** the jump itself, from just before the exit until the canopy is open, whoever is in view.
      Optionally the landing as a second clip.
-   - **A grade (day tape):** exit to break-off, only while someone fills at least 20% of the picture.
-   - **B grade:** everything in A grade plus looser footage, with short look-aways joined up.
+   - **A grade video:** the best video. Exit to break-off, only while someone fills at least 20% of the picture.
+     Untick **Include the exit** to start at freefall.
+   - **B grade video:** not as good, for when A grade is not enough. Everything in A grade plus looser video, with
+     short look-aways joined up.
 3. Click **Process videos**. Tick **Keep watching for new videos** to carry on with videos you copy in later.
    As a guide, 24 jump videos (62 minutes of footage, mostly 4K at 60 frames a second) took 7.6 minutes on an
    RTX 5090 and 25.7 minutes on a GTX 1060, one video at a time with all three choices ticked. After the first video
@@ -167,7 +170,10 @@ If it is missing, the app shows a red panel and refuses to process rather than q
 
 ## Privacy
 
-Nothing is uploaded. After setup the app works offline and makes no network connections of its own. (Setup switches
+Nothing is uploaded. After setup the app works offline. It makes one network connection of its own: when it starts,
+it asks GitHub, where Skydive Cutter is published, for the number of the latest version, so it can tell you when a
+newer one is out. Nothing about your PC or your videos is sent, nothing is downloaded or installed for you, and
+**Check for a newer version when the app starts** (Advanced settings > Processing) switches it off. (Setup switches
 off Ultralytics' anonymous usage statistics.) Your original videos
 are only read, never changed, moved or renamed. Results, settings and logs stay in the folders you choose and in the app's own folder. Logs
 and CSVs contain your file paths, so check them before sharing.

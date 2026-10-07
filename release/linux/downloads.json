@@ -1,0 +1,36 @@
+{
+  "note": "Everything the Linux setup downloads besides the Python packages. Python and the person detector are pinned by checksum; FFmpeg takes the publisher's current build (see ffmpeg.note). The Python packages are pinned, with their checksums, in requirements-linux-x86_64.txt.",
+  "python": {
+    "x86_64": {
+      "filename": "cpython-3.12.14-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "936c246dfdbbfa7cb22dd01814a21f582a892689fae96b06071a5e433baffa22",
+      "urls": [
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz"
+      ],
+      "note": "setup.sh carries the same three values, because it needs them before any Python exists to read this file. A test keeps the two equal."
+    }
+  },
+  "torch": {
+    "x86_64": {
+      "note": "PyTorch 2.7.1 from PyPI, from the lock file. Its Linux wheel brings NVIDIA's CUDA 12.6 libraries as packages, so the one install uses an NVIDIA GPU where there is one and the processor where there is not."
+    }
+  },
+  "ffmpeg": {
+    "x86_64": {
+      "filename": "ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz",
+      "urls": [
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz"
+      ]
+    },
+    "note": "Used only when neither this folder nor the system already has a good FFmpeg. Static FFmpeg 9.0 builds from BtbN/FFmpeg-Builds, the Linux static builds ffmpeg.org links to. The publisher rebuilds this file in place, so it cannot be pinned by checksum: setup accepts any copy that runs, reports FFmpeg 7 or newer (the minimum is in setup.sh) and has the x264 encoder.",
+    "minimum_version": 7
+  },
+  "people": {
+    "filename": "yolo11n.pt",
+    "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+    "note": "Person detector weights. The ultralytics library itself is in the lock file. Ultralytics is AGPL-3.0.",
+    "urls": [
+      "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"
+    ]
+  }
+}

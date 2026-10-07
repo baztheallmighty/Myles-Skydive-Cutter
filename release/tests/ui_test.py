@@ -316,7 +316,7 @@ def main() -> int:
 
     # Start from known settings: an earlier run (or the app itself) must not decide what this run checks.
     save_settings(Settings(input_folder=str(demo / 'input'), output_folder=str(demo / 'clips'),
-                           csv_folder=str(demo / 'clips' / 'timelines')))
+                           csv_folder=str(demo / 'clips' / 'timelines'), mode='advanced'))
     application = QApplication([])
     theme.apply(application)
     window = MainWindow()

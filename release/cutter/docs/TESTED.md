@@ -30,7 +30,7 @@ Basic choices ticked:
 | Ryzen 9 5950X, RTX 5090 | 15.3 min | 7.6 min | 3.5 min (four at once; no gain beyond) |
 | GTX 1060 | 38.4 min | 25.7 min | 17.2 min (two at once) |
 
-With **Trim my footage** alone: 7.6 and 3.6 minutes on the RTX 5090, 23.8 and 16.9 on the GTX 1060. Every timeline
+With **Trim my video** alone: 7.6 and 3.6 minutes on the RTX 5090, 23.8 and 16.9 on the GTX 1060. Every timeline
 from every run was identical to the one made by 2.4.3 one video at a time.
 
 The automated tests (443, run on Windows 10) cover the settings, profiles and joins, clip naming and name clashes,

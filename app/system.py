@@ -68,6 +68,18 @@ MAC_WAIT = ('rm -f "$2"; open -a Terminal "$1" || exit 1; '
             'i=0; while [ $i -lt 21600 ]; do [ -f "$2" ] && exit "$(cat "$2")"; sleep 1; i=$((i+1)); done; exit 124')
 
 
+# Linux has no one terminal program, so this tries the usual ones in turn, then waits the same way. 127 means none
+# was found: run ./setup.sh in a terminal by hand.
+LINUX_WAIT = ('rm -f "$2"; started=""; '
+              'for t in x-terminal-emulator gnome-terminal konsole xfce4-terminal xterm; do '
+              'command -v "$t" >/dev/null 2>&1 || continue; '
+              'case "$t" in gnome-terminal) "$t" -- /bin/bash "$1" ;; *) "$t" -e /bin/bash "$1" ;; esac '
+              '>/dev/null 2>&1 & started=1; break; done; '
+              '[ -n "$started" ] || exit 127; '
+              'i=0; while [ $i -lt 21600 ]; do [ -f "$2" ] && exit "$(cat "$2")"; sleep 1; i=$((i+1)); done; '
+              'exit 124')
+
+
 def installer_argv(root):
     """How to install what is missing, in a window the person can watch. Returns (argv, the file that must exist).
 
@@ -79,9 +91,9 @@ def installer_argv(root):
         script = root / 'Setup.ps1'
         return ([str(p) for p in ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
                                   '-PauseAtEnd']], script)
-    script = root / 'Install Missing.command'
-    return (['/bin/bash', '-c', MAC_WAIT, 'install-missing', str(script), str(root / 'logs' / '.install-status')],
-            script)
+    script = root / ('Install Missing.command' if MACOS else 'install-missing.sh')
+    return (['/bin/bash', '-c', MAC_WAIT if MACOS else LINUX_WAIT, 'install-missing', str(script),
+             str(root / 'logs' / '.install-status')], script)
 
 
 def accelerators():
@@ -101,6 +113,17 @@ def accelerators():
 def best_device():
     """What 'automatic' picks here."""
     return accelerators()[0]
+
+
+def people_device(chosen):
+    """Where the person detector should run, or None to leave it where its own library puts it.
+
+    Left to itself the library picks an NVIDIA GPU or the processor and never Apple's GPU, so on a Mac 'automatic'
+    has to say so.
+    """
+    if chosen != 'auto':
+        return chosen
+    return 'mps' if best_device() == 'mps' else None
 
 
 def device_choices():

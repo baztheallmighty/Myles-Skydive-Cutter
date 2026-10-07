@@ -49,7 +49,7 @@ class KeepProfile:
 TRIM, LANDING, A_GRADE, A_CANOPY, B_GRADE = 'Trimmed', 'Trimmed landing', 'A grade', 'A grade canopy', 'B grade'
 SKYDIVE = frozenset({'exit', 'freefall', 'break_off', 'opening_parachutes'})
 WORKING = frozenset({'exit', 'freefall', 'break_off'})
-MOST_SECONDS_EITHER_SIDE = 10.0   # the adjustable seconds in basic mode go no further than this
+MOST_SECONDS_EITHER_SIDE = 3600.0   # the adjustable seconds in basic mode: as far as the profile editor goes
 
 
 def built_in_profiles():
@@ -61,7 +61,7 @@ def built_in_profiles():
         KeepProfile(LANDING, frozenset({'landing'}), min_person_count=0, min_total_area_percent=0.0,
                     margin_before_seconds=5.0, margin_after_seconds=5.0, max_gap_seconds=4.0, enabled=False,
                     folder=TRIM),
-        # Day-tape footage: somebody close, from exit to the end of break-off.
+        # The best video: somebody close, from exit to the end of break-off.
         KeepProfile(A_GRADE, WORKING, min_person_count=1, min_total_area_percent=20.0, margin_before_seconds=2.0,
                     margin_after_seconds=2.0, min_span_seconds=2.0, max_gap_seconds=2.0, enabled=False),
         KeepProfile(A_CANOPY, frozenset({'canopy_flight'}), min_person_count=2, min_total_area_percent=20.0,
@@ -154,6 +154,8 @@ class Settings:
     poll_seconds: float = preference(5.0)
     keep_watching: bool = preference(False)
     recut_on_review: bool = preference(True)
+    # At start-up, ask whether a newer version has been published. The only thing the app asks the internet.
+    check_updates: bool = preference(True)
     # Remembered window: Qt's own geometry blob, the column split, and which advanced sections were left open.
     window_geometry: str = preference('')
     column_state: str = preference('')
@@ -301,7 +303,8 @@ def validate_settings(settings, require_folders=False):
         raise ValueError('The screen is either basic or advanced.')
     if not all(isinstance(name, str) for name in settings.advanced_enabled):
         raise ValueError('advanced_enabled must be a list of profile names.')
-    for name in ('phases_enabled', 'people_enabled', 'cut_enabled', 'keep_watching', 'recut_on_review'):
+    for name in ('phases_enabled', 'people_enabled', 'cut_enabled', 'keep_watching', 'recut_on_review',
+                 'check_updates'):
         if type(getattr(settings, name)) is not bool:
             raise ValueError(f'{name} must be a boolean.')
     for name in ('input_folder', 'output_folder', 'csv_folder', 'yolo_model'):

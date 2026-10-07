@@ -5,8 +5,8 @@ from datetime import datetime
 import importlib.util
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QByteArray, QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
     QPushButton, QProgressBar, QScrollArea, QSpinBox, QApplication, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton,
@@ -23,6 +23,7 @@ from app.settings import (A_CANOPY, A_GRADE, B_GRADE, LANDING, MAX_PARALLEL_VIDE
                           VIEW_MODES, KeepProfile, Settings, available_detectors, built_in_profiles, load_settings,
                           profile_presets, save_settings, state_directory, validate_settings, with_built_ins)
 from app import help_text
+from app.ui.about import RulesDialog
 from app.ui.help import HelpButton, with_help
 from app.ui.profile_editor import ProfileEditor, decimal_spin
 from app.ui.theme import GOOD_BACKGROUND, MUTED
@@ -35,6 +36,11 @@ import time
 from app.relocate import rebase_entries
 from app.session import ProcessingSession
 from v3_poc.common import RunLock, key
+
+
+# Room left for the title bar and borders when sizing a window before it is shown, when their size is not yet known.
+FRAME_ALLOWANCE = (16, 40)
+SHORT_WINDOW = 900   # below this height (a 1080p screen scaled to 125% or more) the pinned area is squeezed
 
 
 class VideoWorker(QThread):
@@ -62,6 +68,35 @@ class VideoWorker(QThread):
             self.outcome.emit(self.slot, 'cancelled', {'error': str(exc)})
         except Exception as exc:
             self.outcome.emit(self.slot, 'failed', {'error': f'{type(exc).__name__}: {exc}'})
+
+
+class UpdateCheck(QObject):
+    """Asks, off the window's thread, whether a newer version is published. Silent unless there is one.
+
+    A plain daemon thread, not a QThread: the app may be closed while the question is still out, and nothing should
+    have to wait for an answer nobody will read.
+    """
+    found = Signal(str, str)
+    answered = Signal(str, str)   # only when someone pressed the button: the answer, whatever it is
+
+    def __init__(self, parent=None, always_answer=False):
+        super().__init__(parent)
+        self.always_answer = always_answer
+
+    def start(self):
+        import threading
+        threading.Thread(target=self.ask, name='update-check', daemon=True).start()
+
+    def ask(self):
+        from app.update import NEWER, check
+        answer, version, page = check()
+        try:
+            if answer == NEWER:
+                self.found.emit(version, page)
+            if self.always_answer:
+                self.answered.emit(answer, version)
+        except RuntimeError:   # the window went away first
+            pass
 
 
 class Section(QFrame):
@@ -122,7 +157,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.open_review = open_review
         self.setWindowTitle('Skydive Cutter')
-        self.setMinimumSize(1120, 720)
+        self.settled = False   # set once the window has been shown and checked against its screen
         self.setAcceptDrops(True)
         self.workers = {}     # the videos in progress, by which side-by-side place each holds
         self.pacer = None     # with "Videos at once: Automatic", decides when the machine has room for another
@@ -186,7 +221,30 @@ class MainWindow(QMainWindow):
             self.mode_buttons[mode] = button
             row.addWidget(button)
         row.addStretch()
+        self.rules_button = QPushButton(help_text.RULES_TITLE)
+        self.rules_button.setToolTip('The rules the app follows that are not settings: the order of the parts of a '
+                                     'jump, what sound may change, and how matches become clips.')
+        self.rules_button.clicked.connect(lambda: RulesDialog(self).exec())
+        self.check_button = QPushButton('Check for updates')
+        self.check_button.setToolTip('Asks GitHub, where Skydive Cutter is published, whether a newer version is out. '
+                                     'Nothing is downloaded or installed for you.')
+        self.check_button.clicked.connect(self.check_now)
+        row.addWidget(self.rules_button)
+        row.addWidget(self.check_button)
         self.outer.addLayout(row)
+        # No button of its own: it is for the day something looks wrong on a machine nobody else can see.
+        QShortcut(QKeySequence('Ctrl+Shift+D'), self, activated=self.save_diagnostics)
+
+    def save_diagnostics(self):
+        from app.ui.about import save_diagnostics
+        try:
+            path = save_diagnostics(self)
+        except OSError as exc:
+            self.show_warning(f'The diagnostics file could not be written: {exc}')
+            return
+        QApplication.clipboard().setText(path.read_text(encoding='utf-8'))
+        self.status.setText(f'Diagnostics saved as {path.name} in the app\'s logs folder, and copied so you can paste '
+                            'them into a message.')
 
     def profile_named(self, name):
         return next((p for p in self.profiles if p.name == name), None)
@@ -238,15 +296,15 @@ class MainWindow(QMainWindow):
         """Three boxes, one per built-in choice, with the only settings a first run could want."""
         self.basic_panel = QWidget()
         box = QVBoxLayout(self.basic_panel)
-        box.setContentsMargins(0, 4, 0, 4)
-        box.setSpacing(8)
+        box.setContentsMargins(0, 2, 0, 2)
+        box.setSpacing(6)
         self.cards = {}
 
         def card(key, name, help_key, words):
             frame = QFrame()
             frame.setObjectName(name)
             inner = QVBoxLayout(frame)
-            inner.setContentsMargins(14, 10, 10, 10)
+            inner.setContentsMargins(14, 7, 10, 7)
             head = QHBoxLayout()
             tick = QCheckBox(help_text.label(help_key))
             tick.setObjectName('cardTitle')
@@ -275,12 +333,13 @@ class MainWindow(QMainWindow):
             spin = decimal_spin(value, maximum=MOST_SECONDS_EITHER_SIDE)
             spin.setDecimals(1)
             spin.setSingleStep(.5)
-            spin.setFixedWidth(70)
+            spin.setFixedWidth(84)
             spin.valueChanged.connect(self.basic_changed)
             return spin
 
         inner = card(TRIM, 'cardTrim', 'basic_trim',
-                     'Just the jump: from before exit until the canopy is open. Everything else is cut away.')
+                     'Cuts each video down to the jump, so it takes up less space. The plane ride, the canopy '
+                     'flight and the walk back are left out.')
         row = QHBoxLayout()
         self.trim_before = seconds(2.0)
         row.addWidget(QLabel('Start'))
@@ -299,17 +358,20 @@ class MainWindow(QMainWindow):
         inner.addLayout(row)
 
         inner = card(A_GRADE, 'cardA', 'basic_a',
-                     'The good stuff: someone close to the camera (1 person, 20% of the picture), from exit to the '
-                     'end of break-off.')
+                     'The best video: someone close to the camera, filling at least 20% of the picture.')
+        self.a_exit = QCheckBox('Include the exit')
+        self.a_exit.toggled.connect(self.basic_changed)
+        inner.addWidget(self.a_exit)
         self.a_canopy = QCheckBox('Include canopy flight with others in view (2 people, 20% of the picture)')
         self.a_canopy.toggled.connect(self.basic_changed)
         inner.addWidget(self.a_canopy)
 
         card(B_GRADE, 'cardB', 'basic_b',
-             'A grade plus looser footage: people fill 10% of the picture, and gaps are joined when the camera '
-             'wanders.')
-        self.basic_note = QLabel('Each choice gets its own folder inside your clips folder (Trimmed, A grade, B grade), '
-                                 'with clips named after the video they came from.')
+             'Not as good, but worth keeping when A grade is not enough: people are smaller in the picture and '
+             'the camera wanders.')
+        self.basic_note = QLabel('Each choice gets its own folder inside your clips folder.')
+        self.basic_note.setToolTip('The folders are Trimmed, A grade and B grade. Clips are named after the video '
+                                   'they came from.')
         self.basic_note.setObjectName('hint')
         self.basic_note.setWordWrap(True)
         box.addWidget(self.basic_note)
@@ -318,7 +380,7 @@ class MainWindow(QMainWindow):
     def load_basic(self):
         """Show the built-in profiles' state in the boxes."""
         widgets = [card['tick'] for card in self.cards.values()] + [self.trim_before, self.trim_landing,
-                                                                    self.landing_seconds, self.a_canopy]
+                                                                    self.landing_seconds, self.a_exit, self.a_canopy]
         for widget in widgets:
             widget.blockSignals(True)
         named = {name: self.profile_named(name) or built_in_profiles()[name] for name in built_in_profiles()}
@@ -327,6 +389,7 @@ class MainWindow(QMainWindow):
         self.trim_before.setValue(min(MOST_SECONDS_EITHER_SIDE, named[TRIM].margin_before_seconds))
         self.trim_landing.setChecked(named[LANDING].enabled and named[TRIM].enabled)
         self.landing_seconds.setValue(min(MOST_SECONDS_EITHER_SIDE, named[LANDING].margin_before_seconds))
+        self.a_exit.setChecked('exit' in named[A_GRADE].phases)
         self.a_canopy.setChecked(named[A_CANOPY].enabled and named[A_GRADE].enabled)
         for widget in widgets:
             widget.blockSignals(False)
@@ -338,6 +401,7 @@ class MainWindow(QMainWindow):
         for widget in (self.trim_before, self.trim_landing):
             widget.setEnabled(trim)
         self.landing_seconds.setEnabled(trim and self.trim_landing.isChecked())
+        self.a_exit.setEnabled(a_grade)
         self.a_canopy.setEnabled(a_grade)
         for name, card in self.cards.items():
             changed = self.customised(name)
@@ -347,7 +411,8 @@ class MainWindow(QMainWindow):
     def customised(self, name):
         """True when a built-in profile, or its companion, no longer has its built-in settings.
 
-        Whether it is in use, and the seconds basic mode itself offers, are not counted as changes.
+        Whether it is in use, and what basic mode itself offers (the seconds, A grade's exit), are not counted as
+        changes.
         """
         own = {'enabled': True, 'margin_before_seconds': 0.0, 'margin_after_seconds': 0.0}
         for each in {TRIM: (TRIM, LANDING), A_GRADE: (A_GRADE, A_CANOPY), B_GRADE: (B_GRADE,)}[name]:
@@ -355,6 +420,8 @@ class MainWindow(QMainWindow):
             fixed = dict(own) if each in (TRIM, LANDING) else {'enabled': True}
             if each == TRIM:
                 fixed.pop('margin_after_seconds')
+            if each == A_GRADE and now is not None:
+                now = replace(now, phases=now.phases | {'exit'})
             if now is not None and replace(now, **fixed) != replace(built_in_profiles()[each], **fixed):
                 return True
         return False
@@ -374,7 +441,9 @@ class MainWindow(QMainWindow):
         self.set_built_in(TRIM, enabled=trim, margin_before_seconds=self.trim_before.value())
         self.set_built_in(LANDING, enabled=trim and self.trim_landing.isChecked(),
                           margin_before_seconds=either_side, margin_after_seconds=either_side)
-        self.set_built_in(A_GRADE, enabled=a_grade)
+        phases = (self.profile_named(A_GRADE) or built_in_profiles()[A_GRADE]).phases
+        self.set_built_in(A_GRADE, enabled=a_grade,
+                          phases=phases | {'exit'} if self.a_exit.isChecked() else phases - {'exit'})
         self.set_built_in(A_CANOPY, enabled=a_grade and self.a_canopy.isChecked())
         self.set_built_in(B_GRADE, enabled=self.cards[B_GRADE]['tick'].isChecked())
         self.refresh_profiles()
@@ -400,6 +469,68 @@ class MainWindow(QMainWindow):
         for widget in self.banner_widgets:
             widget.hide()
         self.outer.addLayout(banner)
+        # --- a newer version, when there is one ---------------------------------------------------------------------
+        self.update_page = ''
+        self.update_checker = None
+        self.update_banner = QLabel()
+        self.update_banner.setObjectName('bannerUpdate')
+        self.update_banner.setTextFormat(Qt.PlainText)
+        self.update_button = QPushButton('Get the update')
+        self.update_button.setObjectName('primary')
+        self.update_button.setToolTip('Opens the download page in your browser. Nothing is installed for you.')
+        self.update_button.clicked.connect(self.open_update_page)
+        self.update_later = QPushButton('Not now')
+        update = QHBoxLayout()
+        update.addWidget(self.update_banner, 1)
+        update.addWidget(self.update_button)
+        update.addWidget(self.update_later)
+        self.update_widgets = [self.update_banner, self.update_button, self.update_later]
+        self.update_later.clicked.connect(lambda: [widget.hide() for widget in self.update_widgets])
+        for widget in self.update_widgets:
+            widget.hide()
+        self.outer.addLayout(update)
+
+    def check_for_update(self):
+        """Ask once, in the background, whether a newer version is published. Off in a development folder."""
+        from app.update import installed_version
+        if not self.settings.check_updates or not installed_version() or self.update_checker is not None:
+            return
+        self.update_checker = UpdateCheck(self)
+        self.update_checker.found.connect(self.show_update)
+        self.update_checker.start()
+
+    def check_now(self):
+        """The Check for updates button: ask whatever the start-up setting says, and always give an answer."""
+        from app.update import installed_version
+        if not installed_version():
+            self.status.setText('This copy runs from a development folder, so it has no version to compare.')
+            return
+        self.check_button.setEnabled(False)
+        self.status.setText('Checking for a newer version…')
+        self.asked_checker = UpdateCheck(self, always_answer=True)
+        self.asked_checker.found.connect(self.show_update)
+        self.asked_checker.answered.connect(self.update_answer)
+        self.asked_checker.start()
+
+    def update_answer(self, answer, version):
+        from app.update import LATEST_INSTALLED, NEWER, installed_version
+        self.check_button.setEnabled(True)
+        self.status.setText(
+            f'Skydive Cutter {version} is available. Get the update is at the top of the window.' if answer == NEWER
+            else f'You have the latest version, {installed_version()}.' if answer == LATEST_INSTALLED
+            else 'Could not check for a newer version. Check the internet connection and try again.')
+
+    def show_update(self, version, page):
+        from app.update import installed_version
+        self.update_page = page
+        self.update_banner.setText(f'Skydive Cutter {version} is available. You have {installed_version()}.')
+        for widget in self.update_widgets:
+            widget.show()
+
+    def open_update_page(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(self.update_page))
 
     def build_columns(self):
         """The two columns and the scroll area that holds the settings."""
@@ -413,11 +544,11 @@ class MainWindow(QMainWindow):
         self.column = layout = QVBoxLayout(self.controls)
         self.column.setContentsMargins(0, 0, 0, 0)
         scroll.setWidget(self.controls)
-        scroll.setMinimumWidth(520)
+        scroll.setMinimumWidth(440)
         self.results = ResultsPanel()
         self.results.open_in_review.connect(self.open_video_in_review)
         self.results.process_again.connect(self.process_again)
-        self.results.setMinimumHeight(360)
+        self.results.setMinimumHeight(170)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(scroll)
         splitter.addWidget(self.results)
@@ -593,6 +724,9 @@ class MainWindow(QMainWindow):
         self.recut = QCheckBox(help_text.label('recut_on_review'))
         self.recut.setChecked(self.settings.recut_on_review)
         advanced.addRow(with_help(self.recut, 'recut_on_review'))
+        self.check_updates = QCheckBox(help_text.label('check_updates'))
+        self.check_updates.setChecked(self.settings.check_updates)
+        advanced.addRow(with_help(self.check_updates, 'check_updates'))
 
         advanced = self.sections['people'].form
         self.people_toggle = QCheckBox(help_text.label('people_enabled'))
@@ -657,8 +791,6 @@ class MainWindow(QMainWindow):
                              'carry on with new ones as they arrive.')
         self.status.setWordWrap(True)
         self.outer.addWidget(self.status)
-        self.queue_label = QLabel('Queue progress')
-        self.outer.addWidget(self.queue_label)
         self.queue_bar = QProgressBar()
         self.queue_bar.setRange(0, 100)
         self.queue_bar.setValue(0)
@@ -682,7 +814,7 @@ class MainWindow(QMainWindow):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(4000)
-        self.log.setMinimumHeight(70)
+        self.log.setMinimumHeight(44)
         self.log.setMaximumHeight(110)
         self.outer.addWidget(self.log)
         self.phase_toggle.toggled.connect(self.update_gates)
@@ -695,6 +827,7 @@ class MainWindow(QMainWindow):
         self.update_output_mode()
         self.refresh_health(cuda=None)
         QTimer.singleShot(50, self.check_gpu)
+        QTimer.singleShot(1500, self.check_for_update)
         if self.settings_error:
             self.show_warning(self.settings_error)
         self.folder_edits['output_folder'].editingFinished.connect(self.refresh_results)
@@ -808,13 +941,19 @@ class MainWindow(QMainWindow):
                             'The installer finished with problems. Open its window again, or see the logs folder.')
 
     def restore_window(self):
-        """Open at a size that suits this screen, or exactly where it was left last time."""
+        """Open at a size that suits this screen, or exactly where it was left last time.
+
+        Never larger than the screen has room for. A window asked to be bigger than its screen is cut off at the
+        bottom on a small laptop, and on a Mac the system moves and shrinks it without the app being told.
+        """
         screen = QApplication.primaryScreen()
         area = screen.availableGeometry() if screen else None
         if area:
-            self.resize(min(max(int(area.width() * .85), 1120), 2400), min(max(int(area.height() * .85), 720), 1500))
+            room_w, room_h = area.width() - FRAME_ALLOWANCE[0], area.height() - FRAME_ALLOWANCE[1]
+            self.resize(min(max(int(area.width() * .85), 1120), 2400, room_w),
+                        min(max(int(area.height() * .85), 720), 1500, room_h))
             self.move(area.left() + (area.width() - self.width()) // 2,
-                      area.top() + max(0, (area.height() - self.height()) // 3))
+                      area.top() + max(0, (area.height() - self.height() - FRAME_ALLOWANCE[1]) // 3))
         else:
             self.resize(1600, 1000)
         if self.settings.window_geometry:
@@ -828,6 +967,40 @@ class MainWindow(QMainWindow):
     def restore_window_default(self, area):
         self.resize(min(1600, area.width() - 40), min(1000, area.height() - 60))
         self.move(area.left() + 40, area.top() + 40)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # On a short window the log gives its room to the settings and the results; it still scrolls.
+        if hasattr(self, 'log'):
+            self.log.setMaximumHeight(110 if self.height() >= SHORT_WINDOW else 56)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Not without a real screen: the automated tests size the window for themselves on a pretend one.
+        if not self.settled and QApplication.platformName() != 'offscreen':
+            self.settled = True
+            # Once it is really on a screen (only then is the size of its frame known), make sure all of it is.
+            QTimer.singleShot(0, self.keep_on_screen)
+
+    def keep_on_screen(self):
+        """Bring an ordinary window wholly inside the screen it is on: smaller if it must be, then moved."""
+        if self.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen
+                                 | Qt.WindowState.WindowMinimized):
+            return
+        screen = self.screen() or QApplication.primaryScreen()
+        if not screen:
+            return
+        area, frame, inside = screen.availableGeometry(), self.frameGeometry(), self.geometry()
+        extra_w, extra_h = frame.width() - inside.width(), frame.height() - inside.height()
+        width = min(inside.width(), area.width() - extra_w)
+        height = min(inside.height(), area.height() - extra_h)
+        if (width, height) != (inside.width(), inside.height()):
+            self.resize(max(width, self.minimumWidth()), max(height, self.minimumHeight()))
+            frame = self.frameGeometry()
+        left = min(max(frame.left(), area.left()), max(area.left(), area.right() + 1 - frame.width()))
+        top = min(max(frame.top(), area.top()), max(area.top(), area.bottom() + 1 - frame.height()))
+        if (left, top) != (frame.left(), frame.top()):
+            self.move(left, top)
 
     def window_state(self):
         return (bytes(self.saveGeometry().toBase64()).decode('ascii'),
@@ -974,7 +1147,7 @@ class MainWindow(QMainWindow):
             view_mode=self.view_mode.currentData(),
             batch_size=self.batch_size.value(), keep_watching=self.keep_watching.isChecked(),
             hardware_decode=self.hardware_decode.currentData(), parallel_videos=self.parallel.currentData(),
-            recut_on_review=self.recut.isChecked(),
+            recut_on_review=self.recut.isChecked(), check_updates=self.check_updates.isChecked(),
             sample_fps=self.sample_rate.value(), detection_confidence=self.confidence.value(),
             yolo_model=self.detector.currentData() or self.settings.yolo_model,
             window_geometry=geometry, column_state=columns, open_sections=sections,
@@ -1186,7 +1359,7 @@ class MainWindow(QMainWindow):
         try:
             settings = self.read_settings()
             if self.mode == 'basic' and not any(p.enabled for p in settings.profiles):
-                self.show_warning('Tick at least one of Trim my footage, A grade or B grade.')
+                self.show_warning('Tick at least one of Trim my video, A grade video or B grade video.')
                 return
             # Check again here, whatever started this: the GPU answer may not have landed yet, the device may have
             # changed since, and a re-cut from the Review tab never passes the Process button.

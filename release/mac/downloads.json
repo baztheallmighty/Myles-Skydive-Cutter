@@ -27,6 +27,23 @@
     }
   },
   "ffmpeg": {
+    "native_arm64": {
+      "ffmpeg": {
+        "filename": "ffmpeg-9.0.2-arm64.zip",
+        "sha256": "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
+        "urls": [
+          "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip"
+        ]
+      },
+      "ffprobe": {
+        "filename": "ffprobe-9.0.2-arm64.zip",
+        "sha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
+        "urls": [
+          "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip"
+        ]
+      },
+      "note": "Native Apple Silicon builds of FFmpeg 9.0.2 from ffmpeg.martin-riedl.de, used when Homebrew has no FFmpeg. ffmpeg.org links to no native Apple Silicon build, so this source was chosen by the project owner on 6 October 2026. Each ZIP is pinned to the SHA-256 the publisher lists beside it (read on that date); the address carries the build number, so the file is not replaced in place. If it cannot be downloaded or does not run, setup falls back to the Intel build below."
+    },
     "arm64": {
       "ffmpeg": {
         "filename": "ffmpeg-9.0.2.zip",
@@ -55,7 +72,7 @@
         ]
       }
     },
-    "note": "FFmpeg 9.0.2 static builds from evermeet.cx, the macOS build site ffmpeg.org links to. They are Intel programs: Apple Silicon runs them through Rosetta 2, which setup checks for first. Setup accepts any copy that runs and reports FFmpeg 7 or newer (the minimum is in setup.sh). These versioned files are not replaced in place; their evermeet.cx signatures (key 20F6 EA3E 0CFD 6B4C 5344 7A73 476C 4B61 1A66 0874) were checked on 23 September 2026.",
+    "note": "FFmpeg 9.0.2 static builds from evermeet.cx, the macOS build site ffmpeg.org links to. They are Intel programs. An Intel Mac uses them as they are. An Apple Silicon Mac uses them only as a last resort, through Rosetta 2, when neither Homebrew nor the native build above gave a working FFmpeg; setup checks for Rosetta 2 only then. Setup accepts any copy that runs and reports FFmpeg 7 or newer (the minimum is in setup.sh). These versioned files are not replaced in place; their evermeet.cx signatures (key 20F6 EA3E 0CFD 6B4C 5344 7A73 476C 4B61 1A66 0874) were checked on 23 September 2026.",
     "minimum_version": 7
   },
   "people": {

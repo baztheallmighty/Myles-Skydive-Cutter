@@ -123,8 +123,19 @@ class PeopleSampler:
             raise FileNotFoundError(f'Local YOLO model is missing: {settings.yolo_model}')
         runner.log('Loading person detector…')
         self.model = load_yolo_model(settings.yolo_model)
-        if settings.device != 'auto':
-            self.model.to(settings.device)
+        from app.system import people_device
+        device = people_device(settings.device)
+        if device:
+            self.model.to(device)
+        if device == 'mps' and settings.device == 'auto':
+            # Apple's GPU was chosen for the person, not by them: prove the detector runs there before relying on it.
+            try:
+                import numpy as np
+                self.model.predict(source=np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
+            except Exception as exc:  # noqa: BLE001 - any failure here means "use the processor", whatever it was
+                runner.log(f'The person detector does not run on the Apple GPU here ({type(exc).__name__}); '
+                           'using the processor.')
+                self.model.to('cpu')
         self.person_ids = find_person_class_ids(self.model)
         if not self.person_ids:
             raise ValueError('The selected YOLO model has no person class.')

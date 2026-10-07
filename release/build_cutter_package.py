@@ -3,6 +3,7 @@
     python release/build_cutter_package.py              # Windows: stage, check, zip
     python release/build_cutter_package.py --stage-only # stage and check (keeps an installed .runtime for testing)
     python release/build_cutter_package.py --mac        # macOS: the same code with the macOS installer
+    python release/build_cutter_package.py --linux      # Linux: the same code with the Linux installer
 
 Only allowlisted files are copied. The ZIP never contains a runtime, settings, logs, caches, videos or labels. Before
 zipping, every text file and model is scanned for private strings (local folder paths, host names, account names); any
@@ -21,19 +22,21 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / 'release'
-VERSION = '2.6.0'
+VERSION = '2.7.0'
 MAC = '--mac' in sys.argv
-PLATFORM = 'macos' if MAC else 'windows'
-NAME = f'Skydive-Cutter-{VERSION}' + ('-macos' if MAC else '')
+LINUX = '--linux' in sys.argv
+UNIX = MAC or LINUX   # one folder you unzip and a shell script you run, instead of the Windows launchers
+PLATFORM = 'macos' if MAC else 'linux' if LINUX else 'windows'
+NAME = f'Skydive-Cutter-{VERSION}' + ('' if PLATFORM == 'windows' else f'-{PLATFORM}')
 DEST = RELEASE / 'dist' / NAME
 sys.path.insert(0, str(RELEASE))   # release/privacy.py
 
 FILES = {
     'app': ['__init__.py', 'main.py', 'cutting.py', 'detection.py', 'eta.py', 'ffmpeg_tools.py', 'health.py',
             'help_text.py', 'load.py', 'monitor.py', 'outputs.py', 'people.py', 'profiles.py', 'progress.py', 'relocate.py', 'runs.py', 'runtime.py',
-            'session.py', 'settings.py', 'spans.py', 'system.py', 'timeline.py'],
+            'session.py', 'settings.py', 'spans.py', 'system.py', 'timeline.py', 'update.py'],
     'app/classifiers': ['__init__.py', 'contract.py', 'v4.py'],
-    'app/ui': ['__init__.py', 'check.svg', 'help.py', 'main_window.py', 'profile_editor.py', 'results.py', 'review_tab.py',
+    'app/ui': ['__init__.py', 'about.py', 'check.svg', 'help.py', 'main_window.py', 'profile_editor.py', 'results.py', 'review_tab.py',
                'theme.py'],
     'cutter_v4': ['__init__.py', 'audio.py', 'engine.py', 'media.py', 'motion.py', 'networks.py', 'review.py', 'review_ui.py'],
     'cutter_v4/models': ['MODELS.json', 'visual.pt', 'temporal.pt', 'audio.pt', 'motion.joblib'],
@@ -76,6 +79,19 @@ MAC_REWRITES = {
 MAC_DROPPED_SECTIONS = {'docs/TROUBLESHOOTING.md': ['## The installer']}   # up to the next heading of the same level
 MAC_EXECUTABLE = {'setup.sh', 'skydive-cutter.sh', 'Skydive Cutter.command', 'Repair.command',
                   'Install Missing.command'}
+# The Linux package is put together the way the macOS one is; only these differ.
+LINUX_ONLY = RELEASE / 'linux'
+LINUX_WORDS = {'Skydive Cutter.cmd': 'skydive-cutter.sh', 'Repair.cmd': 'repair.sh',
+               'Skydive-Cutter.ps1': 'skydive-cutter.sh', 'Setup.ps1': 'setup.sh',
+               f'Skydive-Cutter-{VERSION}-windows.zip': f'Skydive-Cutter-{VERSION}-linux.zip'}
+LINUX_EXECUTABLE = {'setup.sh', 'skydive-cutter.sh', 'repair.sh', 'install-missing.sh'}
+LINUX_REWRITES = {'docs/USER_GUIDE.md': [
+    ('1. Double-click **`Skydive Cutter.cmd`** in the folder you unzipped. The first run',
+     '1. Run **`./Skydive Cutter.cmd`** in a terminal, from the folder you unzipped. The first run')]}
+UNIX_ONLY = LINUX_ONLY if LINUX else MAC_ONLY
+UNIX_WORDS = LINUX_WORDS if LINUX else MAC_WORDS
+UNIX_EXECUTABLE = LINUX_EXECUTABLE if LINUX else MAC_EXECUTABLE
+UNIX_README = 'README-linux.md' if LINUX else 'README-mac.md'
 # What an install adds to a staged folder. Kept between builds so --stage-only can be tested with a real runtime;
 # everything else in the staged folder is replaced, so files dropped from the package do not linger there.
 INSTALLED_STATE = {'.runtime', '.downloads', 'cache', 'logs', 'bin', 'third_party', 'installation.json', 'yolo11n.pt',
@@ -116,8 +132,13 @@ def mac_text(relative: str, text: str) -> str:
         if text.count(old) != 1:
             raise ValueError(f'{relative}: the passage rewritten for macOS was not found once: {old[:60]!r}')
         text = text.replace(old, new)
-    for windows_word, mac_word in MAC_WORDS.items():
-        text = text.replace(windows_word, mac_word)
+    if LINUX:
+        for old, new in LINUX_REWRITES.get(relative, ()):
+            if text.count(old) != 1:
+                raise ValueError(f'{relative}: the passage rewritten for Linux was not found once: {old[:60]!r}')
+            text = text.replace(old, new)
+    for windows_word, unix_word in UNIX_WORDS.items():
+        text = text.replace(windows_word, unix_word)
     return text.replace('\n', ending)
 
 
@@ -160,18 +181,18 @@ def stage() -> list[str]:
             names.append(f'{folder}/{name}')
     for source in sorted(p for p in PACKAGE_ONLY.rglob('*') if p.is_file() and not compiled(p)):
         relative = source.relative_to(PACKAGE_ONLY).as_posix()
-        if MAC and source.name in WINDOWS_ONLY_FILES:
+        if UNIX and source.name in WINDOWS_ONLY_FILES:
             continue
         target = DEST / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        if MAC and source.suffix == '.md':
+        if UNIX and source.suffix == '.md':
             target.write_bytes(mac_text(relative, source.read_bytes().decode('utf-8')).encode('utf-8'))
         else:
             shutil.copyfile(source, target)
         names.append(relative)
-    if MAC:
-        for source in sorted(p for p in MAC_ONLY.rglob('*') if p.is_file() and not compiled(p)):
-            name = 'README.md' if source.name == 'README-mac.md' else source.name
+    if UNIX:
+        for source in sorted(p for p in UNIX_ONLY.rglob('*') if p.is_file() and not compiled(p)):
+            name = 'README.md' if source.name == UNIX_README else source.name
             # Shell scripts must keep Unix line endings, so they are copied byte for byte.
             (DEST / name).write_bytes(source.read_bytes())
             names.append(name)
@@ -185,7 +206,8 @@ def stage() -> list[str]:
             raise ValueError(f'Model checksum mismatch: {entry["file"]}')
     release = {'name': 'Skydive Cutter', 'version': VERSION, 'license': 'GPL-3.0-only',
                'engine_revision': models['engine_revision'],
-               'target': 'macOS 13+ (Apple Silicon or Intel)' if MAC else 'Windows 10/11 x64',
+               'target': {'macos': 'macOS 13+ (Apple Silicon or Intel)', 'linux': 'Linux x86_64, glibc 2.28+',
+                          'windows': 'Windows 10/11 x64'}[PLATFORM],
                'platform': PLATFORM,
                'packaged_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
                'contents': 'Application code, trained models, installer and documentation. No videos, labels, '
@@ -242,10 +264,10 @@ def privacy_check(names: list[str]) -> None:
 
 
 def archive(names: list[str]) -> None:
-    path = RELEASE / 'dist' / (f'{NAME}.zip' if MAC else f'{NAME}-windows.zip')
+    path = RELEASE / 'dist' / (f'{NAME}.zip' if UNIX else f'{NAME}-windows.zip')
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as output:
         for name in names:
-            if MAC and name in MAC_EXECUTABLE:
+            if UNIX and name in UNIX_EXECUTABLE:
                 # Unix permissions live in the top half of external_attr: 0o755, and the regular-file bit.
                 info = zipfile.ZipInfo.from_file(DEST / name, f'{NAME}/{name}')
                 info.create_system = 3  # Unix; required for macOS extractors to interpret external_attr as mode bits.
@@ -261,8 +283,8 @@ def archive(names: list[str]) -> None:
             assert hashlib.sha256(checked.read(f'{NAME}/{name}')).hexdigest() == expected, name
         listed = checked.namelist()
         assert len(listed) == len(names)
-        if MAC:
-            for name in MAC_EXECUTABLE:
+        if UNIX:
+            for name in UNIX_EXECUTABLE:
                 info = checked.getinfo(f'{NAME}/{name}')
                 assert info.create_system == 3 and info.external_attr >> 16 == 0o100755, name
         assert not any(part in n for n in listed for part in ('/.runtime/', '/logs/', '/cache/', 'settings.json',
