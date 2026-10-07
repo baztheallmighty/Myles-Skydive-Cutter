@@ -3,19 +3,21 @@
 Finds the jump in your skydiving videos, keeps the parts you want, and lets you correct anything it got wrong. Same
 app as the Windows version, same models, same results.
 
-**This is the first Linux package, and it is untested on Linux.** The setup script has been checked on Windows:
-it parses, its FFmpeg choice has been run with stand-ins, and every package it installs has been checked to exist
-for Linux with its checksum. Neither setup nor the app has yet been run all the way through on a Linux PC. Please
-tell me what happens: the setup log is in the `logs` folder, and Ctrl+Shift+D in the app saves a diagnostics file to
-send.
+**This is the first Linux package, and its window has not yet been used on a Linux desktop.** What has been tested,
+on 7 October 2026, is everything behind the window, on one machine: a fresh Ubuntu 24.04 with an NVIDIA RTX 3070 and
+no screen. Setup installed everything from nothing and its install check passed on the graphics card. Two jump videos
+(a DJI and a GoPro, 7 minutes together) were then processed with Trim my video, A grade and B grade in one minute,
+reading the video on the graphics card, and gave ten playable clips. The window was only built, never shown, and no
+other Linux has been tried. Please tell me what happens: the setup log is in the `logs` folder, and Ctrl+Shift+D in
+the app saves a diagnostics file to send.
 
 ## What you need
 
 - A 64-bit Intel or AMD PC running a Linux with the GNU C library 2.28 or newer: Ubuntu 20.04, Debian 10, Fedora 29,
   or anything later. Setup checks this first.
 - A desktop (X11 or Wayland). The app is a window, not a command-line tool.
-- About 16 GB free while installing. Setup checks this first too. PyTorch for Linux brings NVIDIA's libraries with it
-  whether or not you have an NVIDIA card, which is most of the size.
+- About 16 GB free while installing. Setup checks this first too. The finished install measured 11 GB. PyTorch for
+  Linux brings NVIDIA's libraries with it whether or not you have an NVIDIA card, which is most of the size.
 - `curl` and `tar`, which nearly every Linux has.
 - Internet for the first run only. After that the app only asks, once at start-up, whether a newer version is out.
 - For speed, an NVIDIA graphics card with its driver installed. Without one the app uses the processor: expect
@@ -35,11 +37,13 @@ FFmpeg. It asks for no root password and touches nothing else on the system. Exp
 Every later start checks the same list in about a second and opens straight away. Once the app has opened you can
 close the terminal.
 
-If the window does not open, setup's last lines say whether a system library the window needs is missing, and give
-the one command that installs it. On Ubuntu or Debian that is:
+The window needs a few system libraries that cannot be installed into the app's folder. A desktop Linux usually has
+them already. If any is missing, setup stops, names them and gives the command that installs them; run setup again
+afterwards and it carries on without downloading anything twice. On Ubuntu or Debian the command is:
 
 ```bash
-sudo apt install libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3
+sudo apt install libglib2.0-0 libgl1 libegl1 libfontconfig1 libdbus-1-3 libxkbcommon-x11-0 libxcb-cursor0 \
+  libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0 libxrandr2 libpulse0
 ```
 
 If a piece goes missing later, the app offers **Install now**, which opens a terminal window to fetch it. If no

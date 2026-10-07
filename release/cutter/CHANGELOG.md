@@ -28,8 +28,9 @@ Clearer choices, a window that fits smaller screens, and a note when a newer ver
 - **Ctrl+Shift+D** saves a diagnostics file to send with a problem report.
 - **A first Linux package**, `Skydive-Cutter-2.7.0-linux.zip`, for 64-bit Intel and AMD PCs: unzip it and run
   `bash ./skydive-cutter.sh`. It installs into its own folder without a root password, uses an NVIDIA card when
-  there is one, and uses the FFmpeg already on the system when that is version 7 or newer. It has not yet been
-  run on Linux; see its README.
+  there is one, and uses the FFmpeg already on the system when that is version 7 or newer. Setup and
+  processing were tested on one Ubuntu 24.04 machine with an NVIDIA card; the window has not yet been used on a
+  Linux desktop. See its README.
 - **Apple Silicon Macs get an FFmpeg built for them.** Until now every Mac got the Intel build, which an Apple
   Silicon Mac runs through Rosetta 2. Setup now uses Homebrew's FFmpeg if you already have it, otherwise a
   native build from ffmpeg.martin-riedl.de pinned by checksum, and only falls back to the Intel build (and asks

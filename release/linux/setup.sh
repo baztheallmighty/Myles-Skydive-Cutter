@@ -250,6 +250,34 @@ fi
 export YOLO_CONFIG_DIR="${root}/cache/ultralytics"
 "$python" -c 'from ultralytics import settings; settings.update({"sync": False})' >/dev/null 2>&1 || true
 
+# --- the system libraries the window needs -------------------------------------------------------------------------
+# A desktop Linux normally has these and a bare server does not. They cannot be installed into this folder, and the
+# app's window cannot open without them, so setup stops here and says how to get them. Everything downloaded so far
+# is kept: running setup again carries straight on.
+known_libraries="$(ldconfig -p 2>/dev/null || true)"
+missing_libraries=""
+# The list is what the installed Qt was found to ask for on a bare Ubuntu 24.04, by reading its libraries with ldd.
+for library in libglib-2.0.so.0 libGL.so.1 libEGL.so.1 libfontconfig.so.1 libdbus-1.so.3 libxkbcommon-x11.so.0 \
+               libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-keysyms.so.1 libxcb-shape.so.0 libxcb-image.so.0 \
+               libxcb-render-util.so.0 libXrandr.so.2 libpulse.so.0; do
+  case "$known_libraries" in
+    *"$library"*) ;;
+    *) missing_libraries="${missing_libraries} ${library}" ;;
+  esac
+done
+if [ -n "$missing_libraries" ]; then
+  echo
+  echo "Almost there. The app's window needs these system libraries, which this system does not have:${missing_libraries}"
+  echo "Install them, then run setup again (nothing is downloaded twice):"
+  echo "  Ubuntu or Debian:"
+  echo "    sudo apt install libglib2.0-0 libgl1 libegl1 libfontconfig1 libdbus-1-3 libxkbcommon-x11-0 libxcb-cursor0 \\"
+  echo "      libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0 libxrandr2 libpulse0"
+  echo "  Fedora:"
+  echo "    sudo dnf install glib2 mesa-libGL mesa-libEGL fontconfig dbus-libs libxkbcommon-x11 xcb-util-cursor \\"
+  echo "      xcb-util-wm xcb-util-keysyms libxcb xcb-util-image xcb-util-renderutil libXrandr pulseaudio-libs"
+  exit 1
+fi
+
 # --- prove it works ------------------------------------------------------------------------------------------
 device="cpu"
 if [ $force_cpu = 0 ] && "$python" -c 'import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)' 2>/dev/null; then
@@ -266,18 +294,6 @@ json.dump({'schema_version': 1, 'profile': f'linux-{arch}', 'python': '.runtime/
           open('installation.json', 'w'), indent=1)
 PYTHON
 "$python" -m pip freeze > "logs/installed-linux-${arch}.txt"
-
-# The window itself needs a few system libraries that a desktop Linux normally has and a bare server does not.
-missing_libraries=""
-for library in libxcb-cursor.so.0 libxkbcommon-x11.so.0 libEGL.so.1 libGL.so.1 libfontconfig.so.1 libdbus-1.so.3; do
-  if ! ldconfig -p 2>/dev/null | grep -q "$library"; then missing_libraries="${missing_libraries} ${library}"; fi
-done
-if [ -n "$missing_libraries" ]; then
-  echo
-  echo "The app's window may not open: these system libraries were not found:${missing_libraries}"
-  echo "On Ubuntu or Debian:  sudo apt install libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3"
-  echo "On Fedora:            sudo dnf install xcb-util-cursor libxkbcommon-x11 mesa-libEGL mesa-libGL fontconfig dbus-libs"
-fi
 
 echo
 echo "Setup passed. Skydive Cutter opens next."
